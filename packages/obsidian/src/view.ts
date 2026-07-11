@@ -39,8 +39,6 @@ export class TaskPaperView extends TextFileView {
   private applyingExternalData = false;
   private searchbarEl!: HTMLElement;
   private searchInput!: HTMLInputElement;
-  /** Keeps the searchbar visible with no active filter (Begin editor search). */
-  private searchbarPinned = false;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -66,10 +64,6 @@ export class TaskPaperView extends TextFileView {
     this.buildEditor();
     this.plugin.lastActiveView = this;
     this.plugin.refreshSidebar();
-    this.addAction('filter', 'Filter', () => this.plugin.commands.filter(this));
-    this.addAction('x-circle', 'Clear filter / focus', () =>
-      this.plugin.commands.clearFocus(this),
-    );
     this.addAction('archive', 'Archive done items', () =>
       this.plugin.commands.archiveDone(this),
     );
@@ -80,8 +74,9 @@ export class TaskPaperView extends TextFileView {
     this.editor?.destroy();
   }
 
-  /** The original app's searchbar: appears when a filter is active, shows the
-   *  live query, is editable in place, and closes via Escape or the ✕. */
+  /** The original app's searchbar, permanently visible above the editor
+   *  (replacing the Filter header button): shows the live query for the
+   *  active filter, is editable in place, and Escape/✕ clears the filter. */
   private buildSearchbar(): void {
     this.searchbarEl = this.contentEl.createDiv({ cls: 'tp-searchbar' });
     const icon = this.searchbarEl.createSpan({ cls: 'tp-searchbar-icon' });
@@ -92,7 +87,7 @@ export class TaskPaperView extends TextFileView {
     });
     const close = this.searchbarEl.createSpan({ cls: 'tp-searchbar-close' });
     setIcon(close, 'x');
-    close.onclick = () => this.closeSearchbar();
+    close.onclick = () => this.clearSearchbar();
 
     this.searchInput.addEventListener('input', () => {
       const q = this.searchInput.value.trim();
@@ -119,25 +114,23 @@ export class TaskPaperView extends TextFileView {
     this.searchInput.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        this.closeSearchbar();
+        this.clearSearchbar();
       } else if (e.key === 'Enter') {
         e.preventDefault();
         this.editor.focus();
       }
     });
-    this.searchbarEl.style.display = 'none';
   }
 
-  /** Show the searchbar (even with no filter yet) and focus its input. */
+  /** Focus the searchbar's input (the 'Begin editor search' command). */
   openSearchbar(): void {
-    this.searchbarPinned = true;
     this.updateSearchbar();
     this.searchInput.focus();
     this.searchInput.select();
   }
 
-  private closeSearchbar(): void {
-    this.searchbarPinned = false;
+  /** Clear the active filter; the bar itself stays (it is always visible). */
+  private clearSearchbar(): void {
     this.focusedLine = null;
     this.sidebarSelection = [];
     this.editor.dispatch({ effects: setFilterEffect.of(null) });
@@ -146,7 +139,7 @@ export class TaskPaperView extends TextFileView {
     this.editor.focus();
   }
 
-  /** Sync the searchbar with the active filter (hidden when there is none). */
+  /** Sync the searchbar's text with the active filter. */
   updateSearchbar(): void {
     if (!this.searchbarEl || !this.editor) {
       return;
@@ -158,11 +151,6 @@ export class TaskPaperView extends TextFileView {
       projectName = item ? item.displayText.replace(/\s*@[A-Za-z0-9._-]+(\([^)]*\))?/g, '').trim() : null;
     }
     const text = searchbarText(spec, projectName);
-    if (text === null && !this.searchbarPinned) {
-      this.searchbarEl.style.display = 'none';
-      return;
-    }
-    this.searchbarEl.style.display = '';
     // Don't fight the user's own typing.
     if (document.activeElement !== this.searchInput) {
       this.searchInput.value = text ?? '';
