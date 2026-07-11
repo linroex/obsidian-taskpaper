@@ -63,9 +63,10 @@
 .taskpaper-view .cm-content {
   padding: var(--size-4-4);
   caret-color: var(--text-normal);
-  /* One outline level per tab — 17px, matching the original app's
-   * `item-indent: 17 * @ui-scale` (base-stylesheet.less). */
-  tab-size: 17px;
+  /* One outline level per tab = the measured width of "- " in the editor
+   * font (set at runtime as --tp-indent), so a note's text lines up exactly
+   * under its parent task's title — like the original app. */
+  tab-size: var(--tp-indent, 17px);
 }
 
 .taskpaper-view .cm-focused {
@@ -209,11 +210,11 @@ body.taskpaper-no-strike .tp-done {
   background-image: repeating-linear-gradient(
     to right,
     var(--tp-guide-color) 0 1px,
-    transparent 1px 17px
+    transparent 1px var(--tp-indent, 17px)
   );
-  /* N lines, 17px apart, starting under the parent's handle dot. */
-  background-size: calc(var(--tp-guides, 0) * 17px) 100%;
-  background-position-x: 8px;
+  /* N lines, one indent unit apart, starting under the parent's handle dot. */
+  background-size: calc(var(--tp-guides, 0) * var(--tp-indent, 17px)) 100%;
+  background-position-x: calc(var(--tp-indent, 17px) / 2 - 0.5px);
   background-repeat: no-repeat;
 }
 
@@ -234,7 +235,9 @@ body.taskpaper-no-strike .tp-done {
 .tp-handle::before {
   content: '';
   position: absolute;
-  right: 5px;
+  /* Dot center sits half an indent unit left of the item text — on the
+   * guide line of its children. */
+  right: calc(var(--tp-indent, 17px) / 2 - 3.5px);
   /* The zero-height inline anchor sits ON the text baseline, so `top: 50%`
    * parked the dot at the baseline (too low). Center it on the visual middle
    * of the glyphs: dot top = baseline - (glyph-mid ≈ 0.31em) - dot半徑. */
