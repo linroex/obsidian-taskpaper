@@ -538,6 +538,27 @@ check(
   freshArch !== null && freshArch.join('|') === 'Inbox:|\t- b||Archive:|\t- a @done @project(Inbox)',
   JSON.stringify(freshArch),
 );
+// Trailing whitespace-only lines are separators — they stay in place and are
+// never dragged into the Archive as stray indented blank lines.
+const sepArch = archiveDone(
+  ['TKS:', '\t- 123', '\t- Sony @done', '\t', 'Archive:', '\t- old @done @project(Log)'],
+  4,
+);
+check(
+  'trailing whitespace line stays out of the archive',
+  sepArch !== null &&
+    sepArch.join('|') ===
+      'TKS:|\t- 123|\t|Archive:|\t- Sony @done @project(TKS)|\t- old @done @project(Log)',
+  JSON.stringify(sepArch),
+);
+const sepArchNested = archiveDone(['W:', '\t- a @done', '\t\thttps://x', '\t\t', 'Archive:'], 4);
+check(
+  'nested trailing whitespace also stays out',
+  sepArchNested !== null &&
+    sepArchNested.join('|') === 'W:|\t\t|Archive:|\t- a @done @project(W)|\t\thttps://x',
+  JSON.stringify(sepArchNested),
+);
+
 const noTagArch = archiveDone(['Work:', '\t- x @done', 'Archive:'], 4, { addProjectTag: false });
 check(
   'addProjectTag=false omits @project',

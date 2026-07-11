@@ -97,11 +97,22 @@ export function planArchiveDone(
     return null;
   }
 
+  // A subtree's trailing whitespace-only lines are visual separators, not
+  // content — they stay in place instead of being dragged into the Archive
+  // (they'd otherwise pile up as stray indented blank lines there).
+  const blockEnd = (root: Item): number => {
+    let end = root.subtreeEnd;
+    while (end > root.line && lines[end].trim().length === 0) {
+      end--;
+    }
+    return end;
+  };
+
   const itemsByLine = new Map(outline.items.map((i) => [i.line, i]));
   const block: string[] = [];
   for (const root of roots) {
     const projectPath = addProjectTag_ ? ancestorProjectPath(root, archiveName) : undefined;
-    for (let ln = root.line; ln <= root.subtreeEnd; ln++) {
+    for (let ln = root.line; ln <= blockEnd(root); ln++) {
       const item = itemsByLine.get(ln);
       if (!item) {
         block.push(''); // only blank lines are not outline items
@@ -120,9 +131,9 @@ export function planArchiveDone(
   for (const root of roots) {
     const last = removals[removals.length - 1];
     if (last && last[1] === root.line) {
-      last[1] = root.subtreeEnd + 1;
+      last[1] = blockEnd(root) + 1;
     } else {
-      removals.push([root.line, root.subtreeEnd + 1]);
+      removals.push([root.line, blockEnd(root) + 1]);
     }
   }
 
