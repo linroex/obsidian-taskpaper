@@ -235,8 +235,10 @@ body.taskpaper-no-strike .tp-done {
   content: '';
   position: absolute;
   right: 5px;
-  top: 50%;
-  transform: translateY(-50%);
+  /* The zero-height inline anchor sits ON the text baseline, so `top: 50%`
+   * parked the dot at the baseline (too low). Center it on the visual middle
+   * of the glyphs: dot top = baseline - (glyph-mid ≈ 0.31em) - dot半徑. */
+  top: calc(-0.31em - 3.5px);
   width: 7px;
   height: 7px;
   box-sizing: border-box;
