@@ -16,13 +16,23 @@ export function leadingTabs(lineText: string): number {
  */
 export function guideDepths(outline: Outline, lineCount: number): number[] {
   const depths: number[] = new Array(lineCount).fill(0);
-  for (const item of outline.items) {
-    if (item.children.length === 0) {
-      continue;
+  // Linear sweep with a stack of open parents (a per-parent subtree scan
+  // would be quadratic on deep outlines). Open parents form a chain with
+  // levels 0..top.level, so the guide count is top.level + 1.
+  const stack: { level: number; subtreeEnd: number }[] = [];
+  let idx = 0;
+  for (let ln = 0; ln < lineCount; ln++) {
+    while (stack.length > 0 && stack[stack.length - 1].subtreeEnd < ln) {
+      stack.pop();
     }
-    const end = Math.min(item.subtreeEnd, lineCount - 1);
-    for (let ln = item.line + 1; ln <= end; ln++) {
-      depths[ln] = Math.max(depths[ln], item.level + 1);
+    if (stack.length > 0) {
+      depths[ln] = stack[stack.length - 1].level + 1;
+    }
+    while (idx < outline.items.length && outline.items[idx].line === ln) {
+      const item = outline.items[idx++];
+      if (item.children.length > 0) {
+        stack.push({ level: item.level, subtreeEnd: item.subtreeEnd });
+      }
     }
   }
   return depths;

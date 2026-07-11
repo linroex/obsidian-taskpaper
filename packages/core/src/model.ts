@@ -167,14 +167,16 @@ export function withAncestors(item: Item): Item[] {
  */
 export function attachedNotes(item: Item): Item[] {
   const out: Item[] = [];
-  const walk = (node: Item) => {
+  // Explicit stack — a recursive walk could overflow on very deep note chains.
+  const stack: Item[] = [item];
+  while (stack.length > 0) {
+    const node = stack.pop()!;
     for (const child of node.children) {
       if (child.kind === 'note') {
         out.push(child);
-        walk(child);
+        stack.push(child);
       }
     }
-  };
-  walk(item);
+  }
   return out;
 }

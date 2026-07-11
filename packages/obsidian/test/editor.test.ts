@@ -484,6 +484,13 @@ check('url opens as-is', linkHref({ kind: 'url', text: 'https://a.com' }) === 'h
     JSON.stringify(backspaceUnindentDeletion('      x', 6, 4)) === JSON.stringify({ from: 2, to: 6 }),
   );
   check('backspace mid-text falls through', backspaceUnindentDeletion('\t- task', 5, 4) === null);
+  // `-foo` is plain text, not a marker — cursor after the dash deletes normally.
+  check('backspace after plain-text dash falls through', backspaceUnindentDeletion('\t-foo', 2, 4) === null);
+  check(
+    'backspace after lone dash at EOL deletes it as a marker',
+    JSON.stringify(backspaceUnindentDeletion('\t-', 2, 4)) === JSON.stringify({ from: 1, to: 2 }),
+    JSON.stringify(backspaceUnindentDeletion('\t-', 2, 4)),
+  );
   check('backspace at column 0 falls through', backspaceUnindentDeletion('\t- task', 0, 4) === null);
   check('backspace at margin with no marker falls through', backspaceUnindentDeletion('task', 0, 4) === null);
 }

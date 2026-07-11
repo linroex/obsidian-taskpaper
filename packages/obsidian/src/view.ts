@@ -133,6 +133,11 @@ export class TaskPaperView extends TextFileView {
   private clearSearchbar(): void {
     this.focusedLine = null;
     this.sidebarSelection = [];
+    // Set the input directly — updateSearchbar() skips syncing while the
+    // input is focused (e.g. Escape pressed inside it), which would leave
+    // the old query text behind.
+    this.searchInput.value = '';
+    this.searchInput.removeClass('tp-query-error');
     this.editor.dispatch({ effects: setFilterEffect.of(null) });
     this.plugin.refreshSidebar();
     this.updateSearchbar();
@@ -359,6 +364,14 @@ export class TaskPaperView extends TextFileView {
       state: EditorState.create({ doc: this.data ?? '', extensions }),
       parent: this.contentEl,
     });
+    this.measureIndentUnit();
+    // Fonts can finish loading after the first measurement; remeasure then.
+    document.fonts?.ready.then(() => this.measureIndentUnit());
+  }
+
+  onResize(): void {
+    // Zoom / theme / font changes all trigger a resize — keep the indent
+    // unit in sync with the actual glyph widths.
     this.measureIndentUnit();
   }
 

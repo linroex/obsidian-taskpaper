@@ -60,12 +60,22 @@ export function backspaceUnindentDeletion(
   tabSize: number,
 ): { from: number; to: number } | null {
   const before = lineText.slice(0, col);
-  if (!/^[\t ]*(?:-[ \t]*)?$/.test(before)) {
+  if (!/^[\t ]*(?:- ?)?$/.test(before)) {
     return null;
   }
   const indent = /^[\t ]*/.exec(before)?.[0] ?? '';
-  // Stage 1: the `- ` marker sits before the cursor — delete it, keep the indent.
+  // Stage 1: the `- ` marker sits before the cursor — delete it, keep the
+  // indent. Only a REAL marker counts: `- ` complete, or a lone `-` at the
+  // end of the line / before whitespace (`-foo` is plain text, not a task).
   if (before.length > indent.length) {
+    const isMarker =
+      before.endsWith('- ') ||
+      col >= lineText.length ||
+      lineText[col] === ' ' ||
+      lineText[col] === '\t';
+    if (!isMarker) {
+      return null; // plain text dash — let Backspace delete one character
+    }
     return { from: indent.length, to: before.length };
   }
   if (indent.length === 0) {
