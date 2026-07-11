@@ -171,6 +171,20 @@ body.taskpaper-no-strike .tp-done {
   color: var(--text-normal);
 }
 
+/* Global saved searches (from settings) — marked with a small badge. */
+.taskpaper-sidebar .tp-sb-search-global .tp-sb-search-name {
+  flex: 1;
+}
+
+.taskpaper-sidebar .tp-sb-global-badge {
+  color: var(--text-faint);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: 0 4px;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+}
+
 .taskpaper-sidebar .tp-sb-count {
   color: var(--text-on-accent);
   background: var(--interactive-accent);
@@ -186,4 +200,18 @@ body.taskpaper-no-strike .tp-done {
   margin: var(--size-4-2) 0 var(--size-4-1);
   font-size: var(--font-ui-small);
   color: var(--text-muted);
+}
+
+/* ---- Settings tab: global-search rows (name + query + delete) ---- */
+.tp-setting-global-search .setting-item-info {
+  display: none;
+}
+
+.tp-setting-global-search .setting-item-control {
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.tp-setting-global-search .setting-item-control input[type='text'] {
+  flex: 1;
 }

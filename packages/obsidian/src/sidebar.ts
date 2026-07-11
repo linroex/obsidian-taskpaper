@@ -3,7 +3,7 @@ import { EditorSelection } from '@codemirror/state';
 import { focusVisibleLines, Item, projectStats, savedSearches, toggleFocusTarget } from '@taskpaper/core';
 import { outlineOf } from './editor/outline';
 import { setFilterEffect } from './editor/filter';
-import { sidebarSignature } from './sidebarLogic';
+import { parseTagList, settingsSignature, sidebarSignature, visibleTagCounts } from './sidebarLogic';
 import type TaskPaperPlugin from './main';
 import type { TaskPaperView } from './view';
 
@@ -47,10 +47,11 @@ export class TaskPaperSidebarView extends ItemView {
 
   render(force = false): void {
     const view = this.plugin.lastActiveView;
+    const settingsKey = settingsSignature(this.plugin.settings);
     const signature =
       view && view.editor
-        ? sidebarSignature(view.file?.path ?? '?', view.editor.state.doc.length, view.focusedLine)
-        : sidebarSignature(null, 0, null);
+        ? sidebarSignature(view.file?.path ?? '?', view.editor.state.doc.length, view.focusedLine, settingsKey)
+        : sidebarSignature(null, 0, null, settingsKey);
     if (!force && signature === this.renderedSignature) {
       return;
     }
@@ -71,25 +72,37 @@ export class TaskPaperSidebarView extends ItemView {
     const clearBtn = toolbar.createEl('button', { text: '顯示全部', cls: 'tp-sb-clear' });
     clearBtn.onclick = () => this.clearFocus(view);
 
-    // Searches section.
+    // Searches section: global searches (from settings) first, then the document's own @search items.
+    const globalSearches = this.plugin.settings.globalSearches.filter((s) => s.query.trim() !== '');
     const searches = savedSearches(outline);
-    if (searches.length > 0) {
+    if (globalSearches.length > 0 || searches.length > 0) {
       const searchSection = container.createDiv({ cls: 'tp-sb-section' });
       searchSection.createDiv({ cls: 'tp-sb-heading', text: 'Searches' });
-      for (const s of searches) {
-        const el = searchSection.createDiv({ cls: 'tp-sb-item tp-sb-search' });
-        el.createSpan({ cls: 'tp-sb-search-name', text: s.name });
-        el.setAttr('title', s.query);
+      const addSearch = (name: string, query: string, global: boolean) => {
+        const el = searchSection.createDiv({
+          cls: global ? 'tp-sb-item tp-sb-search tp-sb-search-global' : 'tp-sb-item tp-sb-search',
+        });
+        el.createSpan({ cls: 'tp-sb-search-name', text: name });
+        if (global) {
+          el.createSpan({ cls: 'tp-sb-global-badge', text: '全域' });
+        }
+        el.setAttr('title', query);
         el.onclick = () => {
           view.editor.dispatch({
             effects: setFilterEffect.of({
               mode: 'query',
-              query: s.query,
+              query,
               hide: this.plugin.settings.filterHidesInsteadOfDims,
             }),
           });
           this.app.workspace.revealLeaf(view.leaf);
         };
+      };
+      for (const s of globalSearches) {
+        addSearch(s.name.trim() || s.query, s.query, true);
+      }
+      for (const s of searches) {
+        addSearch(s.name, s.query, false);
       }
     }
 
@@ -124,10 +137,14 @@ export class TaskPaperSidebarView extends ItemView {
     }
     const tagSection = container.createDiv({ cls: 'tp-sb-section' });
     tagSection.createDiv({ cls: 'tp-sb-heading', text: 'Tags' });
-    if (counts.size === 0) {
+    const sorted = visibleTagCounts(
+      counts,
+      parseTagList(this.plugin.settings.includeTags),
+      parseTagList(this.plugin.settings.excludeTags),
+    );
+    if (sorted.length === 0) {
       tagSection.createDiv({ cls: 'tp-sb-empty', text: '（無標籤）' });
     }
-    const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
     for (const [name, count] of sorted) {
       const el = tagSection.createDiv({ cls: 'tp-sb-item tp-sb-tag' });
       el.createSpan({ cls: 'tp-sb-tag-name', text: `@${name}` });
