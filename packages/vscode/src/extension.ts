@@ -10,6 +10,7 @@ import { newTask } from './commands/newItem';
 import { archiveDone } from './commands/archive';
 import { focus, clearFocus, goToProject, focusProjectAt, clearProjectFocus } from './commands/focus';
 import { filter, applyFilterQuery } from './commands/filter';
+import { focusState } from './providers/focusState';
 import { moveUp, moveDown, indent, outdent } from './commands/outlineOps';
 import { saveSearch } from './commands/saveSearch';
 import { TaskPaperTreeProvider } from './providers/treeProvider';
@@ -27,16 +28,20 @@ export function activate(context: vscode.ExtensionContext): void {
   /** Apply a query from the tree — or clear it when that exact query is
    *  already active (same click-again-to-cancel gesture as project focus). */
   const toggleTreeFilter = async (uri: vscode.Uri, query: string, preserveFocus: boolean) => {
+    // Decide BEFORE showing the document — switching editors resets activeFilter.
+    const alreadyActive = tree.isActiveFilter(uri, query);
     const doc = await vscode.workspace.openTextDocument(uri);
     const editor = await vscode.window.showTextDocument(doc, { preserveFocus });
-    if (tree.isActiveFilter(uri, query)) {
+    if (alreadyActive) {
       tree.activeFilter = null;
       tree.refresh();
-      await clearFocus(editor);
+      // Only drop the filter dimming — leave the user's folds alone.
+      focusState.clear(editor.document.uri);
       return;
     }
-    await applyFilterQuery(editor, query);
-    tree.activeFilter = { uri: uri.toString(), query };
+    if (await applyFilterQuery(editor, query)) {
+      tree.activeFilter = { uri: uri.toString(), query };
+    }
     tree.refresh();
   };
 
@@ -88,7 +93,9 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     ),
 
-    registerEditorCommand('taskpaper.showToday', (editor) => applyFilterQuery(editor, '@today')),
+    registerEditorCommand('taskpaper.showToday', async (editor) => {
+      await applyFilterQuery(editor, '@today');
+    }),
 
     // Language providers.
     vscode.languages.registerFoldingRangeProvider(selector, new TaskPaperFoldingProvider()),

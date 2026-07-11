@@ -25,18 +25,19 @@ export async function filter(editor: vscode.TextEditor): Promise<void> {
   await applyFilterQuery(editor, trimmed);
 }
 
-/** Apply a query: dim non-matching lines in place and open the live results view. */
+/** Apply a query: dim non-matching lines in place and open the live results
+ *  view. Returns false when the query failed to parse (nothing applied). */
 export async function applyFilterQuery(
   editor: vscode.TextEditor,
   query: string,
-): Promise<void> {
+): Promise<boolean> {
   const outline = getOutline(editor.document, tabSizeFor(editor.document));
   let matches: Set<Item>;
   try {
     matches = runQuery(query, outline);
   } catch (err) {
     vscode.window.showErrorMessage(`Query error: ${(err as Error).message}`);
-    return;
+    return false;
   }
 
   // In-place dim: keep matches and their ancestors visible.
@@ -57,4 +58,5 @@ export async function applyFilterQuery(
     preview: true,
     preserveFocus: false,
   });
+  return true;
 }
