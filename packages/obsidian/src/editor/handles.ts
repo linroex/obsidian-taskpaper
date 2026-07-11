@@ -7,8 +7,10 @@ import {
   ViewUpdate,
   WidgetType,
 } from '@codemirror/view';
-import { foldedRanges, foldEffect, unfoldEffect } from '@codemirror/language';
-import { buildOutline, Outline } from '@taskpaper/core';
+import { foldEffect, unfoldEffect } from '@codemirror/language';
+import { buildOutline, focusVisibleLines, Outline } from '@taskpaper/core';
+import { setFilterEffect } from './filter';
+import { foldedRangeAtLine, subtreeFoldRange } from './folding';
 import { outlineOf } from './outline';
 
 // ---------------------------------------------------------------------------
@@ -124,24 +126,14 @@ function buildHandleDecorations(view: EditorView): DecorationSet {
 
 /** Toggle the fold of the subtree under `lineNo` (0-based). */
 function toggleHandleFold(view: EditorView, lineNo: number): void {
-  const state = view.state;
-  const outline = outlineOf(state);
-  const item = outline.items.find((i) => i.line === lineNo);
-  if (!item || item.subtreeEnd <= item.line) {
-    return;
-  }
-  const line = state.doc.line(lineNo + 1);
-  let existing: { from: number; to: number } | null = null;
-  foldedRanges(state).between(line.to, line.to, (from, to) => {
-    if (from === line.to) {
-      existing = { from, to };
-    }
-  });
+  const existing = foldedRangeAtLine(view.state, lineNo);
   if (existing) {
     view.dispatch({ effects: unfoldEffect.of(existing) });
-  } else {
-    const to = state.doc.line(item.subtreeEnd + 1).to;
-    view.dispatch({ effects: foldEffect.of({ from: line.to, to }) });
+    return;
+  }
+  const range = subtreeFoldRange(view.state, lineNo);
+  if (range) {
+    view.dispatch({ effects: foldEffect.of(range) });
   }
 }
 
@@ -268,47 +260,77 @@ class HandleDrag {
   }
 }
 
-/** Handle dot at the start of items with children: click folds, drag moves. */
-export const itemHandles = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet;
-    /** The live drag session, so destroy()/edits can abort it (no window-
-     *  listener leak, no stale plan committing over newer edits). */
-    activeDrag: HandleDrag | null = null;
-    constructor(view: EditorView) {
-      this.decorations = buildHandleDecorations(view);
-    }
-    update(update: ViewUpdate) {
-      if (update.docChanged && this.activeDrag) {
-        this.activeDrag.cancel();
+export interface HandleOptions {
+  /** Whether a handle-triggered focus hides (true) or dims (false) non-matches. */
+  hide(): boolean;
+  /** Called after Alt-clicking a project's handle focused it. */
+  onFocus(line: number): void;
+}
+
+/**
+ * Handle dot at the start of items with children: click folds, drag moves,
+ * Alt(Option)-click on a project focuses it (TaskPaper 3: "Option-Click a
+ * project's handle to focus").
+ */
+export function itemHandles(opts: HandleOptions) {
+  return ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet;
+      /** The live drag session, so destroy()/edits can abort it (no window-
+       *  listener leak, no stale plan committing over newer edits). */
+      activeDrag: HandleDrag | null = null;
+      constructor(view: EditorView) {
+        this.decorations = buildHandleDecorations(view);
+      }
+      update(update: ViewUpdate) {
+        if (update.docChanged && this.activeDrag) {
+          this.activeDrag.cancel();
+          this.activeDrag = null;
+        }
+        if (update.docChanged || update.viewportChanged) {
+          this.decorations = buildHandleDecorations(update.view);
+        }
+      }
+      destroy() {
+        this.activeDrag?.cancel();
         this.activeDrag = null;
       }
-      if (update.docChanged || update.viewportChanged) {
-        this.decorations = buildHandleDecorations(update.view);
-      }
-    }
-    destroy() {
-      this.activeDrag?.cancel();
-      this.activeDrag = null;
-    }
-  },
-  {
-    decorations: (v) => v.decorations,
-    eventHandlers: {
-      mousedown(event, view) {
-        const target = event.target instanceof HTMLElement ? event.target : null;
-        if (!target || event.button !== 0 || !target.classList.contains('tp-handle')) {
-          return false;
-        }
-        const line = Number(target.getAttribute('data-line'));
-        if (Number.isNaN(line)) {
-          return false;
-        }
-        event.preventDefault();
-        this.activeDrag?.cancel();
-        this.activeDrag = new HandleDrag(view, line, event, () => toggleHandleFold(view, line));
-        return true;
+    },
+    {
+      decorations: (v) => v.decorations,
+      eventHandlers: {
+        mousedown(event, view) {
+          const target = event.target instanceof HTMLElement ? event.target : null;
+          if (!target || event.button !== 0 || !target.classList.contains('tp-handle')) {
+            return false;
+          }
+          const line = Number(target.getAttribute('data-line'));
+          if (Number.isNaN(line)) {
+            return false;
+          }
+          if (event.altKey) {
+            const outline = outlineOf(view.state);
+            const item = outline.items.find((i) => i.line === line);
+            if (item?.kind === 'project') {
+              event.preventDefault();
+              view.dispatch({
+                effects: setFilterEffect.of({
+                  mode: 'focus',
+                  visible: focusVisibleLines(outline, line),
+                  hide: opts.hide(),
+                }),
+              });
+              opts.onFocus(line);
+              return true;
+            }
+            // Alt on a non-project handle: fall through to the plain gesture.
+          }
+          event.preventDefault();
+          this.activeDrag?.cancel();
+          this.activeDrag = new HandleDrag(view, line, event, () => toggleHandleFold(view, line));
+          return true;
+        },
       },
     },
-  },
-);
+  );
+}

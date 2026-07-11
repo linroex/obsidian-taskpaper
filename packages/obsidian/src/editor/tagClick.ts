@@ -2,17 +2,24 @@ import { Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { FilterSpec, filterSpecField, setFilterEffect } from './filter';
 
+/** Render a tag value as a query literal: bare when a single word, quoted otherwise. */
+function queryValueLiteral(value: string): string {
+  return /^\w+$/.test(value) ? value : `"${value.replace(/(["\\])/g, '\\$1')}"`;
+}
+
 /**
  * Compute the filter that results from clicking a tag (TaskPaper 3 behavior):
- * clicking a tag filters by it; clicking it again while that filter is active
- * clears the filter.
+ * clicking a tag's name filters by the tag, clicking its value filters by
+ * tag + value; clicking again while that exact filter is active clears it.
  */
 export function toggledTagFilter(
   current: FilterSpec | null,
   tagName: string,
   hide: boolean,
+  value?: string,
 ): FilterSpec | null {
-  const query = `@${tagName}`;
+  const query =
+    value === undefined ? `@${tagName}` : `@${tagName} = ${queryValueLiteral(value)}`;
   if (current && current.mode === 'query' && current.query === query) {
     return null;
   }
@@ -48,8 +55,12 @@ export function tagClickExtension(opts: TagClickOptions): Extension {
         return false;
       }
       event.preventDefault();
+      // The `(value)` part carries data-tag-value → search tag + value.
+      const value = tagEl?.getAttribute('data-tag-value') ?? undefined;
       const current = view.state.field(filterSpecField, false) ?? null;
-      view.dispatch({ effects: setFilterEffect.of(toggledTagFilter(current, name, opts.hide())) });
+      view.dispatch({
+        effects: setFilterEffect.of(toggledTagFilter(current, name, opts.hide(), value)),
+      });
       opts.onToggle();
       return true;
     },

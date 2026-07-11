@@ -14,8 +14,12 @@ import { filterExtension, filterDecoField, setFilterEffect } from '../src/editor
 import { toggledTagFilter } from '../src/editor/tagClick';
 import { findLinks, linkHref } from '../src/editor/links';
 import { collectTagNames, tagCompletionSource } from '../src/editor/tagComplete';
-import { backspaceUnindentDeletion } from '../src/editor/keymap';
+import { backspaceUnindentDeletion, escapeClearsFilter } from '../src/editor/keymap';
 import { handleLines, planHandleDrag } from '../src/editor/handles';
+import {
+  linesToCollapseDeepestLevel,
+  linesToExpandShallowestLevel,
+} from '../src/editor/folding';
 import { parseTagList, settingsSignature, sidebarSignature, visibleTagCounts } from '../src/sidebarLogic';
 
 let pass = 0;
@@ -165,6 +169,60 @@ check('signature changes when file changes', sidebarSignature('a.taskpaper', 100
   check('tag click filter hides non-matching lines', setEq(hiddenLines(s), new Set([3, 4, 5])));
 }
 
+// --- tag VALUE click: searches tag + value (TaskPaper 3) ---
+{
+  const set = toggledTagFilter(null, 'waiting', true, 'bob');
+  check(
+    'value click sets a tag+value query (bare word unquoted)',
+    set !== null && set.mode === 'query' && set.query === '@waiting = bob',
+  );
+  check(
+    'clicking the same value again clears the filter',
+    toggledTagFilter(set, 'waiting', true, 'bob') === null,
+  );
+  const other = toggledTagFilter(set, 'waiting', true, 'ann');
+  check(
+    'clicking a different value replaces the filter',
+    other !== null && other.mode === 'query' && other.query === '@waiting = ann',
+  );
+  check(
+    'name click while a value filter is active replaces it',
+    toggledTagFilter(set, 'waiting', true)?.query === '@waiting',
+  );
+  check(
+    'value with spaces is quoted',
+    toggledTagFilter(null, 'note', true, 'the value')?.query === '@note = "the value"',
+  );
+  check(
+    'value with non-word chars is quoted',
+    toggledTagFilter(null, 'due', true, '2026-01-01')?.query === '@due = "2026-01-01"',
+  );
+  check(
+    'quotes and backslashes in the value are escaped',
+    toggledTagFilter(null, 'x', true, 'a "b" \\c')?.query === '@x = "a \\"b\\" \\\\c"',
+  );
+}
+
+// --- tag value filter applied to a document hides the non-matching lines ---
+{
+  const doc = ['P:', '\t- a @waiting(bob)', '\t- b @waiting(ann)'].join('\n');
+  const base = EditorState.create({ doc, extensions: [filterExtension] });
+  const spec = toggledTagFilter(null, 'waiting', true, 'bob');
+  const s = base.update({ effects: setFilterEffect.of(spec) }).state;
+  check('value filter keeps only the matching branch', setEq(hiddenLines(s), new Set([3])), [...hiddenLines(s)].join(','));
+}
+
+// --- Escape clears the filter (keymap-level pure decision) ---
+{
+  check('escape clears an active query filter', escapeClearsFilter(withFilter({ mode: 'query', query: '@today', hide: true })));
+  check('escape clears an active focus filter', escapeClearsFilter(withFilter({ mode: 'focus', visible: new Set([0]), hide: true })));
+  check('escape falls through with no filter', !escapeClearsFilter(withFilter(null)));
+  const cleared = withFilter({ mode: 'query', query: '@today', hide: true }).update({
+    effects: setFilterEffect.of(null),
+  }).state;
+  check('escape-dispatched null clears the filter', !escapeClearsFilter(cleared) && hiddenLines(cleared).size === 0);
+}
+
 // --- links: detection ---
 {
   const links = findLinks('- read https://example.com/a(1).');
@@ -199,6 +257,68 @@ check('signature changes when file changes', sidebarSignature('a.taskpaper', 100
 {
   check('no link inside and/or or 4/5 @done', findLinks('- rate 4/5 and/or more @done').length === 0);
   check('a bare @tag is not an email', findLinks('- task @due(2026-01-01)').length === 0);
+}
+
+// --- links: relative paths + escaped spaces ---
+{
+  const links = findLinks('- see ./notes/plan.md and ../archive/old.taskpaper');
+  check(
+    'relative ./ and ../ paths detected',
+    links.length === 2 &&
+      links[0].kind === 'path' &&
+      links[0].text === './notes/plan.md' &&
+      links[1].kind === 'path' &&
+      links[1].text === '../archive/old.taskpaper',
+  );
+}
+{
+  const links = findLinks('- open ./my\\ file.txt now');
+  check(
+    'escaped spaces stay inside one path link',
+    links.length === 1 && links[0].kind === 'path' && links[0].text === './my\\ file.txt',
+  );
+  check(
+    'escaped spaces are unescaped in the href',
+    linkHref({ kind: 'path', text: './my\\ file.txt' }) === 'file://./my file.txt',
+  );
+}
+
+// --- links: generic scheme URIs ---
+{
+  const links = findLinks('- open obsidian://open?vault=x and x-devonthink-item://ABC-123');
+  check(
+    'generic scheme URIs detected',
+    links.length === 2 &&
+      links[0].kind === 'scheme' &&
+      links[0].text === 'obsidian://open?vault=x' &&
+      links[1].kind === 'scheme' &&
+      links[1].text === 'x-devonthink-item://ABC-123',
+  );
+  check(
+    'generic scheme opens as-is',
+    linkHref({ kind: 'scheme', text: 'obsidian://open?vault=x' }) === 'obsidian://open?vault=x',
+  );
+}
+{
+  check('a time is not a scheme link', findLinks('- standup at 16:15 daily').length === 0);
+  check(
+    'a Windows drive letter is not a scheme link',
+    findLinks('- see C:\\Users\\x and C:/other').length === 0,
+  );
+  check(
+    'a scheme-looking tag value is not a link',
+    findLinks('- item @ref(note:abc-123)').length === 0,
+  );
+  const mixed = findLinks('- read https://example.com then file:///tmp/a.txt');
+  check(
+    'http/file detection not regressed by the scheme alternative',
+    mixed.length === 2 && mixed[0].kind === 'url' && mixed[1].kind === 'file',
+  );
+  const port = findLinks('- visit www.example.com:8080/x');
+  check(
+    'www with a port stays a www link',
+    port.length === 1 && port[0].kind === 'www' && port[0].text === 'www.example.com:8080/x',
+  );
 }
 
 // --- links: hrefs ---
@@ -291,6 +411,41 @@ check(
   planHandleDrag(DRAG_DOC, 2, 5, 4) === null,
 );
 check('an only child cannot move', planHandleDrag(DRAG_DOC, 4, 0, 4) === null);
+
+// --- collapse/expand all by level (original Shift-Cmd-9 / Shift-Cmd-0) ---
+{
+  // A(0) > a1(1) > x(2), a2(1); B(0) > b1(1). Foldable: A, a1, B.
+  const items = buildOutline(['A:', '\t- a1', '\t\t- x', '\t- a2', 'B:', '\t- b1'], 4).items;
+  const none = new Set<number>();
+  check(
+    'first collapse folds the deepest expanded level',
+    linesToCollapseDeepestLevel(items, none).join(',') === '1',
+  );
+  check(
+    'second collapse folds the next level up',
+    linesToCollapseDeepestLevel(items, new Set([1])).join(',') === '0,4',
+  );
+  check(
+    'collapse with everything folded is a no-op',
+    linesToCollapseDeepestLevel(items, new Set([0, 1, 4])).length === 0,
+  );
+  check(
+    'items hidden inside a folded ancestor are not collapse candidates',
+    linesToCollapseDeepestLevel(items, new Set([0])).join(',') === '4',
+  );
+  check(
+    'first expand unfolds the shallowest folded level',
+    linesToExpandShallowestLevel(items, new Set([0, 1, 4])).join(',') === '0,4',
+  );
+  check(
+    'second expand unfolds the next level down',
+    linesToExpandShallowestLevel(items, new Set([1])).join(',') === '1',
+  );
+  check(
+    'expand with nothing folded is a no-op',
+    linesToExpandShallowestLevel(items, none).length === 0,
+  );
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

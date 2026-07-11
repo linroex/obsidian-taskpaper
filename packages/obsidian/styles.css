@@ -99,6 +99,18 @@ body.taskpaper-no-strike .tp-done {
   padding: var(--size-4-1) var(--size-4-2);
 }
 
+/* Query parse errors highlight red, TaskPaper-style. */
+.tp-query-input.tp-query-error {
+  border-color: var(--text-error);
+  color: var(--text-error);
+}
+
+.tp-query-error-msg {
+  color: var(--text-error);
+  font-size: var(--font-ui-small);
+  min-height: 1.2em;
+}
+
 /* ---- Links (http, www, email, file paths) ---- */
 .tp-link {
   color: var(--link-external-color, var(--text-accent));

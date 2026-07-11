@@ -1,5 +1,5 @@
 import { App, FuzzySuggestModal, Modal } from 'obsidian';
-import { Item, resolveDateExpression } from '@taskpaper/core';
+import { Item, parseQuery, resolveDateExpression } from '@taskpaper/core';
 
 /** Prompts for a TaskPaper query. Calls onSubmit(query) or onSubmit(null) to clear. */
 export class QueryModal extends Modal {
@@ -20,6 +20,26 @@ export class QueryModal extends Modal {
     input.placeholder = '@today   |   not @done and task   |   @due <= today [d]';
     input.addClass('tp-query-input');
     input.style.width = '100%';
+
+    // Live validation (TaskPaper 3: a malformed search highlights red).
+    // Empty input stays valid — submitting it clears the filter.
+    const errorEl = contentEl.createDiv({ cls: 'tp-query-error-msg' });
+    const validate = () => {
+      const value = input.value.trim();
+      let message = '';
+      if (value.length > 0) {
+        try {
+          parseQuery(value);
+        } catch (e) {
+          message = `查詢語法錯誤：${e instanceof Error ? e.message : String(e)}`;
+        }
+      }
+      input.toggleClass('tp-query-error', message.length > 0);
+      errorEl.setText(message);
+    };
+    input.addEventListener('input', validate);
+    validate();
+
     window.setTimeout(() => {
       input.focus();
       input.select();
