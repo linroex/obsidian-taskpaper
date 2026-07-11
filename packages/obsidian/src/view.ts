@@ -12,6 +12,7 @@ import { escapeClearsFilter, taskpaperKeymap } from './editor/keymap';
 import { applyOutlineOp } from './editor/outlineEdit';
 import { tagClickExtension } from './editor/tagClick';
 import { dashClickExtension } from './editor/dashClick';
+import type { SidebarSelectionItem } from './sidebarLogic';
 import { linkExtension, LinkKind } from './editor/links';
 import { tagAutocomplete } from './editor/tagComplete';
 import { itemHandles } from './editor/handles';
@@ -24,6 +25,8 @@ export class TaskPaperView extends TextFileView {
   editor!: EditorView;
   /** Line (0-based) of the project currently focused from the sidebar, if any. */
   focusedLine: number | null = null;
+  /** The sidebar rows currently selected (Ctrl/Cmd+click multi-selects). */
+  sidebarSelection: SidebarSelectionItem[] = [];
   private applyingExternalData = false;
 
   constructor(

@@ -9,7 +9,7 @@
  */
 import { EditorState } from '@codemirror/state';
 import { CompletionContext } from '@codemirror/autocomplete';
-import { buildOutline } from '@taskpaper/core';
+import { buildOutline, runQuery } from '@taskpaper/core';
 import { filterExtension, filterDecoField, setFilterEffect } from '../src/editor/filter';
 import { toggledTagFilter } from '../src/editor/tagClick';
 import { findLinks, linkHref } from '../src/editor/links';
@@ -20,7 +20,15 @@ import {
   linesToCollapseDeepestLevel,
   linesToExpandShallowestLevel,
 } from '../src/editor/folding';
-import { parseTagList, settingsSignature, sidebarSignature, visibleTagCounts } from '../src/sidebarLogic';
+import {
+  composeSelection,
+  parseTagList,
+  selectionSignature,
+  settingsSignature,
+  sidebarSignature,
+  toggleSelection,
+  visibleTagCounts,
+} from '../src/sidebarLogic';
 
 let pass = 0;
 let fail = 0;
@@ -150,6 +158,54 @@ check('signature changes when file changes', sidebarSignature('a.taskpaper', 100
   check('exclude wins over include', visibleTagCounts(found, ['search'], ['search']).length === 2);
   // Alphabetical order, matching the original macOS sidebar.
   check('sorted alphabetically', withInclude.map(([n]) => n).join(',') === 'done,due,today');
+}
+
+// --- sidebar multi-select: toggleSelection + composeSelection ---
+{
+  const eqJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const proj = (line: number, name: string) => ({ kind: 'project' as const, line, name });
+  const tag = (query: string) => ({ kind: 'tag' as const, query });
+  const search = (query: string) => ({ kind: 'search' as const, query });
+
+  // Plain click replaces; clicking the sole selected row clears.
+  check('plain click selects', eqJson(toggleSelection([], tag('@a'), false), [tag('@a')]));
+  check('plain click replaces', eqJson(toggleSelection([tag('@a')], tag('@b'), false), [tag('@b')]));
+  check('plain click on sole selection clears', toggleSelection([tag('@a')], tag('@a'), false).length === 0);
+  // Ctrl/Cmd+click adds and removes.
+  check('ctrl-click adds', toggleSelection([tag('@a')], proj(0, 'W'), true).length === 2);
+  check('ctrl-click removes', eqJson(toggleSelection([tag('@a'), tag('@b')], tag('@a'), true), [tag('@b')]));
+  check('same query, different kind both selectable', toggleSelection([tag('@a')], search('@a'), true).length === 2);
+
+  // Composition: none / single project focus / union within kind / intersect across kinds.
+  check('empty selection composes to none', composeSelection([]).type === 'none');
+  const single = composeSelection([proj(4, 'Work')]);
+  check('single project keeps focus mode', single.type === 'focus' && single.line === 4);
+  const twoTags = composeSelection([tag('@a'), tag('@b')]);
+  check('two tags union', twoTags.type === 'query' && twoTags.query === '((@a) union (@b))', JSON.stringify(twoTags));
+  const mixed = composeSelection([proj(0, 'Work'), tag('@today')]);
+  check(
+    'project + tag intersect (tag scoped to project)',
+    mixed.type === 'query' && mixed.query === '((project "Work"//*)) intersect ((@today))',
+    JSON.stringify(mixed),
+  );
+  const three = composeSelection([proj(0, 'A'), proj(5, 'B'), search('not @done')]);
+  check(
+    'two projects union, search intersects',
+    three.type === 'query' &&
+      three.query === '((project "A"//*) union (project "B"//*)) intersect ((not @done))',
+    JSON.stringify(three),
+  );
+  // The composed queries actually run: @today inside Work only.
+  const selOutline = buildOutline(
+    ['Work:', '\t- w1 @today', '\t- w2', 'Home:', '\t- h1 @today'],
+    4,
+  );
+  if (mixed.type === 'query') {
+    const hits = [...runQuery(mixed.query, selOutline)];
+    check('composed project+tag query hits only Work @today', hits.length === 1 && hits[0].displayText.startsWith('w1'), hits.map((i) => i.displayText).join('|'));
+  }
+  check('selectionSignature stable', selectionSignature([tag('@a')]) === selectionSignature([tag('@a')]));
+  check('selectionSignature differs', selectionSignature([tag('@a')]) !== selectionSignature([]));
 }
 
 // --- tag click: toggling the filter ---

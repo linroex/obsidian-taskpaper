@@ -2,19 +2,28 @@ import { ItemView, Menu, WorkspaceLeaf } from 'obsidian';
 import { EditorSelection } from '@codemirror/state';
 import {
   focusVisibleLines,
-  Item,
   projectStats,
   quoteQueryValue,
   rewriteSearchLine,
   SavedSearch,
   savedSearches,
   tagNamesToValues,
-  toggleFocusTarget,
 } from '@taskpaper/core';
 import { outlineOf } from './editor/outline';
 import { filterSpecField, setFilterEffect } from './editor/filter';
 import { SaveSearchModal } from './modals';
-import { GlobalSearch, parseTagList, settingsSignature, sidebarSignature, visibleTagCounts } from './sidebarLogic';
+import {
+  composeSelection,
+  GlobalSearch,
+  isSelected,
+  parseTagList,
+  selectionSignature,
+  settingsSignature,
+  sidebarSignature,
+  SidebarSelectionItem,
+  toggleSelection,
+  visibleTagCounts,
+} from './sidebarLogic';
 import type TaskPaperPlugin from './main';
 import type { TaskPaperView } from './view';
 
@@ -63,6 +72,22 @@ export class TaskPaperSidebarView extends ItemView {
     // Filter… command) — the single source of truth for row highlighting.
     const spec = view?.editor ? (view.editor.state.field(filterSpecField, false) ?? null) : null;
     const activeQuery = spec && spec.mode === 'query' ? spec.query : null;
+
+    // When the editor's filter no longer matches what the selection composes
+    // to (Escape, Filter…, editor tag click, …), the selection is stale — drop
+    // it so highlights never lie.
+    if (view && view.editor && view.sidebarSelection.length > 0) {
+      const composed = composeSelection(view.sidebarSelection);
+      const matches =
+        composed.type === 'focus'
+          ? spec?.mode === 'focus' && view.focusedLine === composed.line
+          : composed.type === 'query' && spec?.mode === 'query' && spec.query === composed.query;
+      if (!matches) {
+        view.sidebarSelection = [];
+      }
+    }
+    const selection = view?.sidebarSelection ?? [];
+
     const signature =
       view && view.editor
         ? sidebarSignature(
@@ -71,6 +96,7 @@ export class TaskPaperSidebarView extends ItemView {
             view.focusedLine,
             settingsKey,
             activeQuery,
+            selectionSignature(selection),
           )
         : sidebarSignature(null, 0, null, settingsKey);
     if (!force && signature === this.renderedSignature) {
@@ -110,25 +136,31 @@ export class TaskPaperSidebarView extends ItemView {
       );
       menu.showAtMouseEvent(e);
     });
-    // Apply a query filter — or clear it when that exact query is already
-    // active (same click-again-to-cancel gesture as projects).
-    const toggleQuery = (query: string) => {
-      view.focusedLine = null;
-      view.editor.dispatch({
-        effects: setFilterEffect.of(
-          activeQuery === query
-            ? null
-            : { mode: 'query', query, hide: this.plugin.settings.filterHidesInsteadOfDims },
-        ),
-      });
-      this.app.workspace.revealLeaf(view.leaf);
-      this.plugin.refreshSidebar();
+    // Click = single select (again = clear); Ctrl/Cmd+click = multi-select.
+    const select = (item: SidebarSelectionItem, e: MouseEvent) => {
+      const multi = e.ctrlKey || e.metaKey;
+      // A plain click on the row of an externally applied filter clears it.
+      if (
+        !multi &&
+        selection.length === 0 &&
+        item.kind !== 'project' &&
+        activeQuery === item.query
+      ) {
+        this.clearFocus(view);
+        return;
+      }
+      view.sidebarSelection = toggleSelection(selection, item, multi);
+      this.applySelection(view);
     };
+    const isRowSelected = (item: SidebarSelectionItem): boolean =>
+      isSelected(selection, item) ||
+      (selection.length === 0 && item.kind !== 'project' && activeQuery === item.query);
     const addSearch = (name: string, query: string, global: boolean): HTMLElement => {
       const el = searchSection.createDiv({
         cls: global ? 'tp-sb-item tp-sb-search tp-sb-search-global' : 'tp-sb-item tp-sb-search',
       });
-      if (activeQuery === query) {
+      const selItem: SidebarSelectionItem = { kind: 'search', query };
+      if (isRowSelected(selItem)) {
         el.addClass('is-focused');
       }
       el.createSpan({ cls: 'tp-sb-search-name', text: name });
@@ -136,7 +168,7 @@ export class TaskPaperSidebarView extends ItemView {
         el.createSpan({ cls: 'tp-sb-global-badge', text: '全域' });
       }
       el.setAttr('title', query);
-      el.onclick = () => toggleQuery(query);
+      el.onclick = (e) => select(selItem, e);
       return el;
     };
     for (const s of globalSearches) {
@@ -159,7 +191,9 @@ export class TaskPaperSidebarView extends ItemView {
     for (const p of projects) {
       const el = projSection.createDiv({ cls: 'tp-sb-item tp-sb-project' });
       el.style.paddingLeft = `${8 + p.level * 14}px`;
-      if (view.focusedLine === p.line) {
+      const name = p.displayText.replace(/\s*@[A-Za-z0-9._-]+(\([^)]*\))?/g, '').trim();
+      const selItem: SidebarSelectionItem = { kind: 'project', line: p.line, name };
+      if (isSelected(selection, selItem) || view.focusedLine === p.line) {
         el.addClass('is-focused');
       }
       el.createSpan({ text: p.displayText || '(未命名)' });
@@ -167,7 +201,7 @@ export class TaskPaperSidebarView extends ItemView {
       if (remaining > 0) {
         el.createSpan({ cls: 'tp-sb-count', text: String(remaining) });
       }
-      el.onclick = () => this.toggleFocus(view, p);
+      el.onclick = (e) => select(selItem, e);
     }
 
     // Tags section.
@@ -190,24 +224,57 @@ export class TaskPaperSidebarView extends ItemView {
     const namesToValues = tagNamesToValues(outline);
     for (const [name, count] of sorted) {
       const el = tagSection.createDiv({ cls: 'tp-sb-item tp-sb-tag' });
-      if (activeQuery === `@${name}`) {
+      const tagItem: SidebarSelectionItem = { kind: 'tag', query: `@${name}` };
+      if (isRowSelected(tagItem)) {
         el.addClass('is-focused');
       }
       el.createSpan({ cls: 'tp-sb-tag-name', text: `@${name}` });
       el.createSpan({ cls: 'tp-sb-tag-count', text: String(count) });
-      el.onclick = () => toggleQuery(`@${name}`);
+      el.onclick = (e) => select(tagItem, e);
       // Each distinct value is a child row (original sidebar); clicking it
       // filters with `@tag contains[l] "value"` — exactly the original query.
       for (const value of namesToValues.get(name) ?? []) {
-        const query = `@${name} contains[l] ${quoteQueryValue(value)}`;
+        const valueItem: SidebarSelectionItem = {
+          kind: 'tag',
+          query: `@${name} contains[l] ${quoteQueryValue(value)}`,
+        };
         const vel = tagSection.createDiv({ cls: 'tp-sb-item tp-sb-tag-value' });
-        if (activeQuery === query) {
+        if (isRowSelected(valueItem)) {
           vel.addClass('is-focused');
         }
         vel.createSpan({ text: value });
-        vel.onclick = () => toggleQuery(query);
+        vel.onclick = (e) => select(valueItem, e);
       }
     }
+  }
+
+  /** Dispatch the filter the current selection composes to. */
+  private applySelection(view: TaskPaperView): void {
+    const composed = composeSelection(view.sidebarSelection);
+    const hide = this.plugin.settings.filterHidesInsteadOfDims;
+    if (composed.type === 'none') {
+      view.focusedLine = null;
+      view.editor.dispatch({ effects: setFilterEffect.of(null) });
+    } else if (composed.type === 'focus') {
+      const outline = outlineOf(view.editor.state);
+      view.focusedLine = composed.line;
+      view.editor.dispatch({
+        effects: setFilterEffect.of({
+          mode: 'focus',
+          visible: focusVisibleLines(outline, composed.line),
+          hide,
+        }),
+        selection: EditorSelection.cursor(view.editor.state.doc.line(composed.line + 1).from),
+        scrollIntoView: true,
+      });
+    } else {
+      view.focusedLine = null;
+      view.editor.dispatch({
+        effects: setFilterEffect.of({ mode: 'query', query: composed.query, hide }),
+      });
+    }
+    this.app.workspace.revealLeaf(view.leaf);
+    this.plugin.refreshSidebar();
   }
 
   /** Context menu for a global search (stored in the plugin settings): 編輯 / 刪除. */
@@ -293,29 +360,8 @@ export class TaskPaperSidebarView extends ItemView {
     menu.showAtMouseEvent(e);
   }
 
-  /** Clicking a project focuses it; clicking the focused project again shows everything. */
-  private toggleFocus(view: TaskPaperView, project: Item): void {
-    if (toggleFocusTarget(view.focusedLine, project.line) === null) {
-      this.clearFocus(view);
-      return;
-    }
-    const visible = focusVisibleLines(outlineOf(view.editor.state), project.line);
-    view.focusedLine = project.line;
-    view.editor.dispatch({
-      effects: setFilterEffect.of({
-        mode: 'focus',
-        visible,
-        hide: this.plugin.settings.filterHidesInsteadOfDims,
-      }),
-      selection: EditorSelection.cursor(view.editor.state.doc.line(project.line + 1).from),
-      scrollIntoView: true,
-    });
-    this.app.workspace.revealLeaf(view.leaf);
-    view.editor.focus();
-    this.plugin.refreshSidebar();
-  }
-
   private clearFocus(view: TaskPaperView): void {
+    view.sidebarSelection = [];
     view.focusedLine = null;
     view.editor.dispatch({ effects: setFilterEffect.of(null) });
     this.plugin.refreshSidebar();
