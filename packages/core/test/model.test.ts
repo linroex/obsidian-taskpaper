@@ -1,10 +1,20 @@
 import { buildOutline } from '../src/model';
 import { runQuery } from '../src/query/evaluator';
-import { addTag, removeTag, hasTag, todayStamp } from '../src/tags';
+import { addTag, removeTag, removeAllTags, hasTag, todayStamp } from '../src/tags';
 import { parseDate, resolveDateExpression } from '../src/dates';
-import { moveItemUp, moveItemDown, indentItem, outdentItem } from '../src/outlineOps';
+import {
+  moveItemUp,
+  moveItemDown,
+  indentItem,
+  outdentItem,
+  setLineKind,
+  groupItems,
+  duplicateBranch,
+  deleteBranch,
+  moveBranchToProject,
+} from '../src/outlineOps';
 import { projectStats, documentCounts, savedSearches } from '../src/analysis';
-import { focusVisibleLines, projectsToFold, toggleFocusTarget } from '../src/focus';
+import { focusVisibleLines, focusOutTarget, projectsToFold, toggleFocusTarget } from '../src/focus';
 
 let pass = 0;
 let fail = 0;
@@ -128,6 +138,102 @@ check('outdent removes one tab', out !== null && out.lines[3] === '\t- two-child
 check('moveUp first child returns null', moveItemUp(ol, 1, 4) === null);
 check('outdent at margin returns null', outdentItem(ol, 0, 4) === null);
 
+// --- format conversions ---
+check('task -> project', setLineKind('\t- buy milk', 'project') === '\tbuy milk:');
+check('project -> task', setLineKind('\tErrands:', 'task') === '\t- Errands');
+check('note -> task', setLineKind('\t\tsome note', 'task') === '\t\t- some note');
+check('task -> note', setLineKind('- buy milk', 'note') === 'buy milk');
+check('project -> note', setLineKind('Errands:', 'note') === 'Errands');
+check(
+  'task -> project keeps trailing tags after colon',
+  setLineKind('\t- Ship @due(2026-07-20) @flag', 'project') === '\tShip: @due(2026-07-20) @flag',
+  setLineKind('\t- Ship @due(2026-07-20) @flag', 'project'),
+);
+check(
+  'project -> task keeps trailing tags',
+  setLineKind('Work: @flag', 'task') === '- Work @flag',
+  setLineKind('Work: @flag', 'task'),
+);
+check('format is idempotent (task)', setLineKind('- x', 'task') === '- x');
+check('format is idempotent (project)', setLineKind('X:', 'project') === 'X:');
+check('format blank untouched', setLineKind('   ', 'task') === '   ');
+
+// --- group ---
+const grp = groupItems(['A:', '\t- one', '\t- two', '\t\t- two-child', '\t- three'], 1, 2, 'Sub', 4);
+check(
+  'group inserts project at min indent and indents subtrees',
+  grp !== null &&
+    grp.lines.join('|') === 'A:|\tSub:|\t\t- one|\t\t- two|\t\t\t- two-child|\t- three',
+  JSON.stringify(grp?.lines),
+);
+check('group cursor on new project line before colon', grp !== null && grp.cursorLine === 1 && grp.cursorCol === 4);
+check('group with no items returns null', groupItems(['', ''], 0, 1, 'X', 4) === null);
+
+// --- duplicate branch ---
+const dup = duplicateBranch(['A:', '\t- one', '\t\t- one-child', '\t- two'], 1, 4);
+check(
+  'duplicate copies whole branch after itself',
+  dup !== null &&
+    dup.lines.join('|') === 'A:|\t- one|\t\t- one-child|\t- one|\t\t- one-child|\t- two',
+  JSON.stringify(dup?.lines),
+);
+check('duplicate cursor on the copy', dup !== null && dup.cursorLine === 3);
+const dupChild = duplicateBranch(['A:', '\t- one', '\t\t- one-child', '\t- two'], 2, 4);
+check(
+  'duplicate from a child line copies just that item',
+  dupChild !== null && dupChild.lines[3] === '\t\t- one-child' && dupChild.cursorLine === 3,
+  JSON.stringify(dupChild?.lines),
+);
+
+// --- delete branch ---
+const del = deleteBranch(['A:', '\t- one', '\t\t- one-child', '\t- two'], 1, 1, 4);
+check(
+  'delete removes item and its subtree',
+  del !== null && del.lines.join('|') === 'A:|\t- two',
+  JSON.stringify(del?.lines),
+);
+const delMulti = deleteBranch(['A:', '\t- one', '\t\t- one-child', '\t- two', 'B:'], 1, 3, 4);
+check(
+  'delete spans multi-line selection with subtrees',
+  delMulti !== null && delMulti.lines.join('|') === 'A:|B:',
+  JSON.stringify(delMulti?.lines),
+);
+check('delete on blank-only selection returns null', deleteBranch(['A:', ''], 1, 1, 4) === null);
+
+// --- move branch to project ---
+const mvDoc = ['One:', '\t- a', '\t\t- a-child', 'Two:', '\t- b'];
+const mvFwd = moveBranchToProject(mvDoc, 1, 3, 4); // move "- a" branch into later project Two
+check(
+  'move branch to a later project (end, re-indented)',
+  mvFwd !== null && mvFwd.lines.join('|') === 'One:|Two:|\t- b|\t- a|\t\t- a-child',
+  JSON.stringify(mvFwd?.lines),
+);
+check('move forward cursor on moved line', mvFwd !== null && mvFwd.cursorLine === 3);
+const mvBack = moveBranchToProject(mvDoc, 4, 0, 4); // move "- b" into earlier project One
+check(
+  'move branch to an earlier project',
+  mvBack !== null && mvBack.lines.join('|') === 'One:|\t- a|\t\t- a-child|\t- b|Two:',
+  JSON.stringify(mvBack?.lines),
+);
+const mvDeep = moveBranchToProject(['One:', '\t- a', '\t\t- a-child', 'Two:', '\t- b'], 2, 0, 4);
+check(
+  'move a nested item up to its ancestor project re-indents as direct child',
+  mvDeep !== null && mvDeep.lines.join('|') === 'One:|\t- a|\t- a-child|Two:|\t- b',
+  JSON.stringify(mvDeep?.lines),
+);
+check('move into own subtree returns null', moveBranchToProject(['One:', '\tTwo:', '\t\t- x'], 0, 1, 4) === null);
+check('move to non-project returns null', moveBranchToProject(mvDoc, 4, 1, 4) === null);
+
+// --- removeAllTags ---
+check('removeAllTags strips every tag', removeAllTags('- foo @today @flag') === '- foo');
+check(
+  'removeAllTags handles values and keeps indent',
+  removeAllTags('\t\t- Ship @due(2026-07-20) @done(2026-07-06 10:00)') === '\t\t- Ship',
+  removeAllTags('\t\t- Ship @due(2026-07-20) @done(2026-07-06 10:00)'),
+);
+check('removeAllTags keeps project colon', removeAllTags('Work: @flag') === 'Work:');
+check('removeAllTags no-op without tags', removeAllTags('\t- plain') === '\t- plain');
+
 // --- analysis ---
 const stats = projectStats(outline);
 const workStat = [...stats.entries()].find(([p]) => p.displayText === 'Work')?.[1];
@@ -159,6 +265,10 @@ check(
   JSON.stringify(projectsToFold(focusDoc, inboxLine)) === JSON.stringify([workLine]),
   JSON.stringify(projectsToFold(focusDoc, inboxLine)),
 );
+// focusOutTarget: Home(8) > Errands(9) in the main doc — stepping out of Errands focuses Home.
+const errandsLine = errands.line;
+check('focusOutTarget nested -> ancestor project', focusOutTarget(outline, errandsLine) === outline.roots[2].line, String(focusOutTarget(outline, errandsLine)));
+check('focusOutTarget top-level -> null (clear focus)', focusOutTarget(outline, outline.roots[2].line) === null);
 check('toggle same clears', toggleFocusTarget(3, 3) === null);
 check('toggle different focuses', toggleFocusTarget(3, 0) === 0);
 check('toggle from none focuses', toggleFocusTarget(null, 3) === 3);

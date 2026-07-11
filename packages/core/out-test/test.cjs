@@ -62,6 +62,11 @@ function removeTag(lineText, name) {
   const body = lineText.slice(indent.length).replace(new RegExp(`\\s*@${escapeRegExp(name)}(?:\\((?:\\\\.|[^)\\\\])*\\))?`, "g"), "").replace(/^ +| +$/g, "");
   return indent + body;
 }
+function removeAllTags(lineText) {
+  const indent = /^[\t ]*/.exec(lineText)?.[0] ?? "";
+  const body = lineText.slice(indent.length).replace(/\s*@[A-Za-z0-9._-]+(?:\((?:\\.|[^)\\])*\))?/g, "").replace(/^ +| +$/g, "");
+  return indent + body;
+}
 function setTagValue(lineText, name, value) {
   const tags = parseTags(lineText);
   const existing = tags.find((t) => t.name === name);
@@ -890,6 +895,107 @@ function indentItem(lines2, line, tabSize) {
   }
   return { lines: out2, cursorLine: line };
 }
+var TRAILING_TAGS_RE = /((?:\s+@[A-Za-z0-9._-]+(?:\([^)]*\))?)*)\s*$/;
+function setLineKind(lineText, kind) {
+  const cur = lineKind(lineText);
+  if (cur === "blank" || cur === kind) {
+    return lineText;
+  }
+  const indent = /^[\t ]*/.exec(lineText)?.[0] ?? "";
+  let body = lineText.slice(indent.length);
+  if (cur === "task") {
+    body = body.replace(/^-\s+/, "").replace(/^-$/, "");
+  } else if (cur === "project") {
+    body = body.replace(/:(\s*(@[A-Za-z0-9._-]+(\([^)]*\))?\s*)*)$/, "$1").trimEnd();
+  }
+  if (kind === "task") {
+    return `${indent}- ${body}`;
+  }
+  if (kind === "project") {
+    const m = TRAILING_TAGS_RE.exec(body);
+    const cut = m ? m.index : body.length;
+    if (body.slice(0, cut).endsWith(":")) {
+      return indent + body;
+    }
+    return `${indent}${body.slice(0, cut)}:${body.slice(cut)}`;
+  }
+  return indent + body;
+}
+function groupItems(lines2, startLine, endLine, name, tabSize) {
+  const outline2 = buildOutline(lines2, tabSize);
+  const selected = outline2.items.filter((i) => i.line >= startLine && i.line <= endLine);
+  if (selected.length === 0) {
+    return null;
+  }
+  const start = selected[0].line;
+  let end = endLine;
+  let minIndent = Infinity;
+  let lead = "";
+  for (const it of selected) {
+    end = Math.max(end, it.subtreeEnd);
+    if (it.indent < minIndent) {
+      minIndent = it.indent;
+      lead = /^[\t ]*/.exec(it.raw)?.[0] ?? "";
+    }
+  }
+  const out2 = lines2.slice();
+  for (let i = start; i <= end; i++) {
+    if (out2[i].trim().length > 0) {
+      out2[i] = "	" + out2[i];
+    }
+  }
+  out2.splice(start, 0, `${lead}${name}:`);
+  return { lines: out2, cursorLine: start, cursorCol: lead.length + name.length };
+}
+function duplicateBranch(lines2, line, tabSize) {
+  const { item } = itemAt(lines2, line, tabSize);
+  if (!item) {
+    return null;
+  }
+  const block = lines2.slice(item.line, item.subtreeEnd + 1);
+  const out2 = lines2.slice();
+  out2.splice(item.subtreeEnd + 1, 0, ...block);
+  return { lines: out2, cursorLine: item.subtreeEnd + 1 + (line - item.line) };
+}
+function deleteBranch(lines2, startLine, endLine, tabSize) {
+  const outline2 = buildOutline(lines2, tabSize);
+  const selected = outline2.items.filter((i) => i.line >= startLine && i.line <= endLine);
+  if (selected.length === 0) {
+    return null;
+  }
+  const start = selected[0].line;
+  let end = endLine;
+  for (const it of selected) {
+    end = Math.max(end, it.subtreeEnd);
+  }
+  const out2 = lines2.slice();
+  out2.splice(start, end - start + 1);
+  return { lines: out2, cursorLine: Math.max(0, Math.min(start, out2.length - 1)), cursorCol: 0 };
+}
+function moveBranchToProject(lines2, line, projectLine, tabSize) {
+  const outline2 = buildOutline(lines2, tabSize);
+  const item = outline2.items.find((i) => i.line === line) ?? itemAtLine(outline2, line);
+  const project = outline2.items.find((i) => i.line === projectLine);
+  if (!item || !project || project.kind !== "project") {
+    return null;
+  }
+  if (project.line >= item.line && project.line <= item.subtreeEnd) {
+    return null;
+  }
+  const byLine = new Map(
+    outline2.items.filter((i) => i.line >= item.line && i.line <= item.subtreeEnd).map((i) => [i.line, i])
+  );
+  const block = [];
+  for (let ln = item.line; ln <= item.subtreeEnd; ln++) {
+    const it = byLine.get(ln);
+    block.push(it ? "	".repeat(project.level + 1 + (it.level - item.level)) + it.text : lines2[ln]);
+  }
+  const out2 = lines2.slice();
+  out2.splice(item.line, block.length);
+  const insertAt = item.line <= project.subtreeEnd ? project.subtreeEnd + 1 - block.length : project.subtreeEnd + 1;
+  out2.splice(insertAt, 0, ...block);
+  return { lines: out2, cursorLine: insertAt };
+}
 function outdentItem(lines2, line, tabSize) {
   const { item } = itemAt(lines2, line, tabSize);
   if (!item) {
@@ -1014,6 +1120,18 @@ function projectsToFold(outline2, line) {
     (it) => it.kind === "project" && it !== target && !ancestors2.has(it) && !isDescendant(it) && it.subtreeEnd > it.line
   ).map((it) => it.line);
 }
+function focusOutTarget(outline2, line) {
+  const target = targetAt(outline2, line);
+  if (!target) {
+    return null;
+  }
+  for (let a = target.parent; a; a = a.parent) {
+    if (a.kind === "project") {
+      return a.line;
+    }
+  }
+  return null;
+}
 function toggleFocusTarget(currentLine, clickedLine) {
   return currentLine === clickedLine ? null : clickedLine;
 }
@@ -1123,6 +1241,88 @@ var out = outdentItem(ol, 3, 4);
 check("outdent removes one tab", out !== null && out.lines[3] === "	- two-child", JSON.stringify(out?.lines));
 check("moveUp first child returns null", moveItemUp(ol, 1, 4) === null);
 check("outdent at margin returns null", outdentItem(ol, 0, 4) === null);
+check("task -> project", setLineKind("	- buy milk", "project") === "	buy milk:");
+check("project -> task", setLineKind("	Errands:", "task") === "	- Errands");
+check("note -> task", setLineKind("		some note", "task") === "		- some note");
+check("task -> note", setLineKind("- buy milk", "note") === "buy milk");
+check("project -> note", setLineKind("Errands:", "note") === "Errands");
+check(
+  "task -> project keeps trailing tags after colon",
+  setLineKind("	- Ship @due(2026-07-20) @flag", "project") === "	Ship: @due(2026-07-20) @flag",
+  setLineKind("	- Ship @due(2026-07-20) @flag", "project")
+);
+check(
+  "project -> task keeps trailing tags",
+  setLineKind("Work: @flag", "task") === "- Work @flag",
+  setLineKind("Work: @flag", "task")
+);
+check("format is idempotent (task)", setLineKind("- x", "task") === "- x");
+check("format is idempotent (project)", setLineKind("X:", "project") === "X:");
+check("format blank untouched", setLineKind("   ", "task") === "   ");
+var grp = groupItems(["A:", "	- one", "	- two", "		- two-child", "	- three"], 1, 2, "Sub", 4);
+check(
+  "group inserts project at min indent and indents subtrees",
+  grp !== null && grp.lines.join("|") === "A:|	Sub:|		- one|		- two|			- two-child|	- three",
+  JSON.stringify(grp?.lines)
+);
+check("group cursor on new project line before colon", grp !== null && grp.cursorLine === 1 && grp.cursorCol === 4);
+check("group with no items returns null", groupItems(["", ""], 0, 1, "X", 4) === null);
+var dup = duplicateBranch(["A:", "	- one", "		- one-child", "	- two"], 1, 4);
+check(
+  "duplicate copies whole branch after itself",
+  dup !== null && dup.lines.join("|") === "A:|	- one|		- one-child|	- one|		- one-child|	- two",
+  JSON.stringify(dup?.lines)
+);
+check("duplicate cursor on the copy", dup !== null && dup.cursorLine === 3);
+var dupChild = duplicateBranch(["A:", "	- one", "		- one-child", "	- two"], 2, 4);
+check(
+  "duplicate from a child line copies just that item",
+  dupChild !== null && dupChild.lines[3] === "		- one-child" && dupChild.cursorLine === 3,
+  JSON.stringify(dupChild?.lines)
+);
+var del = deleteBranch(["A:", "	- one", "		- one-child", "	- two"], 1, 1, 4);
+check(
+  "delete removes item and its subtree",
+  del !== null && del.lines.join("|") === "A:|	- two",
+  JSON.stringify(del?.lines)
+);
+var delMulti = deleteBranch(["A:", "	- one", "		- one-child", "	- two", "B:"], 1, 3, 4);
+check(
+  "delete spans multi-line selection with subtrees",
+  delMulti !== null && delMulti.lines.join("|") === "A:|B:",
+  JSON.stringify(delMulti?.lines)
+);
+check("delete on blank-only selection returns null", deleteBranch(["A:", ""], 1, 1, 4) === null);
+var mvDoc = ["One:", "	- a", "		- a-child", "Two:", "	- b"];
+var mvFwd = moveBranchToProject(mvDoc, 1, 3, 4);
+check(
+  "move branch to a later project (end, re-indented)",
+  mvFwd !== null && mvFwd.lines.join("|") === "One:|Two:|	- b|	- a|		- a-child",
+  JSON.stringify(mvFwd?.lines)
+);
+check("move forward cursor on moved line", mvFwd !== null && mvFwd.cursorLine === 3);
+var mvBack = moveBranchToProject(mvDoc, 4, 0, 4);
+check(
+  "move branch to an earlier project",
+  mvBack !== null && mvBack.lines.join("|") === "One:|	- a|		- a-child|	- b|Two:",
+  JSON.stringify(mvBack?.lines)
+);
+var mvDeep = moveBranchToProject(["One:", "	- a", "		- a-child", "Two:", "	- b"], 2, 0, 4);
+check(
+  "move a nested item up to its ancestor project re-indents as direct child",
+  mvDeep !== null && mvDeep.lines.join("|") === "One:|	- a|	- a-child|Two:|	- b",
+  JSON.stringify(mvDeep?.lines)
+);
+check("move into own subtree returns null", moveBranchToProject(["One:", "	Two:", "		- x"], 0, 1, 4) === null);
+check("move to non-project returns null", moveBranchToProject(mvDoc, 4, 1, 4) === null);
+check("removeAllTags strips every tag", removeAllTags("- foo @today @flag") === "- foo");
+check(
+  "removeAllTags handles values and keeps indent",
+  removeAllTags("		- Ship @due(2026-07-20) @done(2026-07-06 10:00)") === "		- Ship",
+  removeAllTags("		- Ship @due(2026-07-20) @done(2026-07-06 10:00)")
+);
+check("removeAllTags keeps project colon", removeAllTags("Work: @flag") === "Work:");
+check("removeAllTags no-op without tags", removeAllTags("	- plain") === "	- plain");
 var stats = projectStats(outline);
 var workStat = [...stats.entries()].find(([p]) => p.displayText === "Work")?.[1];
 check("projectStats Work remaining", !!workStat && workStat.total === 4 && workStat.remaining === 3, JSON.stringify(workStat));
@@ -1150,6 +1350,9 @@ check(
   JSON.stringify(projectsToFold(focusDoc, inboxLine)) === JSON.stringify([workLine]),
   JSON.stringify(projectsToFold(focusDoc, inboxLine))
 );
+var errandsLine = errands.line;
+check("focusOutTarget nested -> ancestor project", focusOutTarget(outline, errandsLine) === outline.roots[2].line, String(focusOutTarget(outline, errandsLine)));
+check("focusOutTarget top-level -> null (clear focus)", focusOutTarget(outline, outline.roots[2].line) === null);
 check("toggle same clears", toggleFocusTarget(3, 3) === null);
 check("toggle different focuses", toggleFocusTarget(3, 0) === 0);
 check("toggle from none focuses", toggleFocusTarget(null, 3) === 3);

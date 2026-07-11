@@ -1,9 +1,11 @@
-import { buildOutline, Item } from './model';
+import { buildOutline, Item, ItemKind, itemAtLine, lineKind } from './model';
 
 export interface OutlineEdit {
   lines: string[];
   /** Where the cursor should land afterwards (0-based line). */
   cursorLine: number;
+  /** Optional column for the cursor; when absent the caller keeps its own column. */
+  cursorCol?: number;
 }
 
 function itemAt(lines: string[], line: number, tabSize: number): { item?: Item; roots: Item[] } {
@@ -67,6 +69,152 @@ export function indentItem(lines: string[], line: number, tabSize: number): Outl
     }
   }
   return { lines: out, cursorLine: line };
+}
+
+/** Trailing run of tags (with leading spaces) at the end of a line body. */
+const TRAILING_TAGS_RE = /((?:\s+@[A-Za-z0-9._-]+(?:\([^)]*\))?)*)\s*$/;
+
+/**
+ * Convert a single line to the given kind in place — task = `- ` prefix,
+ * project = trailing `:` (before any trailing tags), note = bare text —
+ * preserving indentation and tags. Blank lines are returned untouched.
+ */
+export function setLineKind(lineText: string, kind: ItemKind): string {
+  const cur = lineKind(lineText);
+  if (cur === 'blank' || cur === kind) {
+    return lineText;
+  }
+  const indent = /^[\t ]*/.exec(lineText)?.[0] ?? '';
+  let body = lineText.slice(indent.length);
+  if (cur === 'task') {
+    body = body.replace(/^-\s+/, '').replace(/^-$/, '');
+  } else if (cur === 'project') {
+    body = body.replace(/:(\s*(@[A-Za-z0-9._-]+(\([^)]*\))?\s*)*)$/, '$1').trimEnd();
+  }
+  if (kind === 'task') {
+    return `${indent}- ${body}`;
+  }
+  if (kind === 'project') {
+    const m = TRAILING_TAGS_RE.exec(body);
+    const cut = m ? m.index : body.length;
+    if (body.slice(0, cut).endsWith(':')) {
+      return indent + body;
+    }
+    return `${indent}${body.slice(0, cut)}:${body.slice(cut)}`;
+  }
+  return indent + body;
+}
+
+/**
+ * Wrap the items whose lines fall inside [startLine, endLine] in a new project:
+ * the project line is inserted at the selection's minimum indent level and every
+ * selected item (with its subtree) is indented one level under it.
+ */
+export function groupItems(
+  lines: string[],
+  startLine: number,
+  endLine: number,
+  name: string,
+  tabSize: number,
+): OutlineEdit | null {
+  const outline = buildOutline(lines, tabSize);
+  const selected = outline.items.filter((i) => i.line >= startLine && i.line <= endLine);
+  if (selected.length === 0) {
+    return null;
+  }
+  const start = selected[0].line;
+  let end = endLine;
+  let minIndent = Infinity;
+  let lead = '';
+  for (const it of selected) {
+    end = Math.max(end, it.subtreeEnd);
+    if (it.indent < minIndent) {
+      minIndent = it.indent;
+      lead = /^[\t ]*/.exec(it.raw)?.[0] ?? '';
+    }
+  }
+  const out = lines.slice();
+  for (let i = start; i <= end; i++) {
+    if (out[i].trim().length > 0) {
+      out[i] = '\t' + out[i];
+    }
+  }
+  out.splice(start, 0, `${lead}${name}:`);
+  return { lines: out, cursorLine: start, cursorCol: lead.length + name.length };
+}
+
+/** Duplicate an item's entire branch immediately after it (cursor on the copy). */
+export function duplicateBranch(lines: string[], line: number, tabSize: number): OutlineEdit | null {
+  const { item } = itemAt(lines, line, tabSize);
+  if (!item) {
+    return null;
+  }
+  const block = lines.slice(item.line, item.subtreeEnd + 1);
+  const out = lines.slice();
+  out.splice(item.subtreeEnd + 1, 0, ...block);
+  return { lines: out, cursorLine: item.subtreeEnd + 1 + (line - item.line) };
+}
+
+/** Delete the items whose lines fall inside [startLine, endLine], including their subtrees. */
+export function deleteBranch(
+  lines: string[],
+  startLine: number,
+  endLine: number,
+  tabSize: number,
+): OutlineEdit | null {
+  const outline = buildOutline(lines, tabSize);
+  const selected = outline.items.filter((i) => i.line >= startLine && i.line <= endLine);
+  if (selected.length === 0) {
+    return null;
+  }
+  const start = selected[0].line;
+  let end = endLine;
+  for (const it of selected) {
+    end = Math.max(end, it.subtreeEnd);
+  }
+  const out = lines.slice();
+  out.splice(start, end - start + 1);
+  return { lines: out, cursorLine: Math.max(0, Math.min(start, out.length - 1)), cursorCol: 0 };
+}
+
+/**
+ * Move the branch at `line` to the end of the project at `projectLine`,
+ * re-indented to be its direct child. Returns null when the target is not a
+ * project or lies inside the branch being moved.
+ */
+export function moveBranchToProject(
+  lines: string[],
+  line: number,
+  projectLine: number,
+  tabSize: number,
+): OutlineEdit | null {
+  const outline = buildOutline(lines, tabSize);
+  const item = outline.items.find((i) => i.line === line) ?? itemAtLine(outline, line);
+  const project = outline.items.find((i) => i.line === projectLine);
+  if (!item || !project || project.kind !== 'project') {
+    return null;
+  }
+  if (project.line >= item.line && project.line <= item.subtreeEnd) {
+    return null; // cannot move a branch into itself
+  }
+  const byLine = new Map(
+    outline.items
+      .filter((i) => i.line >= item.line && i.line <= item.subtreeEnd)
+      .map((i) => [i.line, i] as const),
+  );
+  const block: string[] = [];
+  for (let ln = item.line; ln <= item.subtreeEnd; ln++) {
+    const it = byLine.get(ln);
+    block.push(it ? '\t'.repeat(project.level + 1 + (it.level - item.level)) + it.text : lines[ln]);
+  }
+  const out = lines.slice();
+  out.splice(item.line, block.length);
+  // The insertion point shifts up when the removed block sits before it
+  // (target project after the source, or the source inside the target).
+  const insertAt =
+    item.line <= project.subtreeEnd ? project.subtreeEnd + 1 - block.length : project.subtreeEnd + 1;
+  out.splice(insertAt, 0, ...block);
+  return { lines: out, cursorLine: insertAt };
 }
 
 /** Outdent an item and its subtree one level (remove one tab, or up to tabSize spaces). */

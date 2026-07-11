@@ -1,24 +1,34 @@
 import { Notice } from 'obsidian';
-import { ChangeSpec, EditorSelection } from '@codemirror/state';
+import { ChangeSpec, EditorSelection, EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { foldAll, foldEffect, unfoldAll } from '@codemirror/language';
 import {
   addTag,
+  deleteBranch,
+  duplicateBranch,
+  focusOutTarget,
+  focusVisibleLines,
   formatTag,
+  groupItems,
   hasTag,
   indentItem,
   Item,
+  ItemKind,
   itemAtLine,
+  moveBranchToProject,
   moveItemDown,
   moveItemUp,
   outdentItem,
+  removeAllTags,
   removeTag,
+  setLineKind,
+  setTagValue,
   todayStamp,
 } from '@taskpaper/core';
 import { outlineOf } from './editor/outline';
 import { setFilterEffect } from './editor/filter';
-import { applyOutlineOp } from './editor/outlineEdit';
-import { QueryModal, ProjectSuggestModal, SaveSearchModal } from './modals';
+import { applyOutlineOp, dispatchOutlineEdit, docLines } from './editor/outlineEdit';
+import { DateModal, QueryModal, ProjectSuggestModal, SaveSearchModal, TextPromptModal } from './modals';
 import type TaskPaperPlugin from './main';
 import { TaskPaperView } from './view';
 
@@ -74,6 +84,147 @@ export class TaskPaperCommands {
       scrollIntoView: true,
     });
     view.editor.focus();
+  }
+
+  /** Insert a new project line after the current one, at the same indent, cursor before the ':'. */
+  newProject(view: TaskPaperView): void {
+    const state = view.editor.state;
+    const line = state.doc.lineAt(state.selection.main.head);
+    const indent = /^[\t ]*/.exec(line.text)?.[0] ?? '';
+    const insert = `\n${indent}:`;
+    view.editor.dispatch({
+      changes: { from: line.to, insert },
+      selection: EditorSelection.cursor(line.to + insert.length - 1),
+      scrollIntoView: true,
+    });
+    view.editor.focus();
+  }
+
+  /** Insert a new note line after the current one, indented one level as its child. */
+  newNote(view: TaskPaperView): void {
+    const state = view.editor.state;
+    const line = state.doc.lineAt(state.selection.main.head);
+    const indent = /^[\t ]*/.exec(line.text)?.[0] ?? '';
+    const insert = `\n${indent}\t`;
+    view.editor.dispatch({
+      changes: { from: line.to, insert },
+      selection: EditorSelection.cursor(line.to + insert.length),
+      scrollIntoView: true,
+    });
+    view.editor.focus();
+  }
+
+  /** Convert each selected line to the given kind, preserving indentation and tags. */
+  formatAs(view: TaskPaperView, kind: ItemKind): void {
+    this.applyToSelectedLines(view.editor, (text) => setLineKind(text, kind));
+  }
+
+  /** Wrap the selected items in a new project named via a prompt. */
+  group(view: TaskPaperView): void {
+    new TextPromptModal(this.plugin.app, 'Group', '專案名稱', (name) => {
+      const state = view.editor.state;
+      const [start, end] = selectedLineRange(state);
+      const result = groupItems(docLines(state), start, end, name, 4);
+      if (result) {
+        dispatchOutlineEdit(view.editor, result);
+        view.editor.focus();
+      }
+    }).open();
+  }
+
+  /** Duplicate the current item's entire branch immediately after it. */
+  duplicate(view: TaskPaperView): void {
+    applyOutlineOp(view.editor, duplicateBranch);
+  }
+
+  /** Delete the selected item(s) including their subtrees. */
+  deleteItems(view: TaskPaperView): void {
+    const state = view.editor.state;
+    const [start, end] = selectedLineRange(state);
+    const result = deleteBranch(docLines(state), start, end, 4);
+    if (result) {
+      dispatchOutlineEdit(view.editor, result);
+    }
+  }
+
+  /** Move the current branch to the end of a picked project, as its direct child. */
+  moveToProject(view: TaskPaperView): void {
+    const state = view.editor.state;
+    const outline = outlineOf(state);
+    const curLine = state.doc.lineAt(state.selection.main.head).number - 1;
+    const item = itemAtLine(outline, curLine);
+    if (!item) {
+      return;
+    }
+    const projects = outline.items.filter(
+      (p) => p.kind === 'project' && (p.line < item.line || p.line > item.subtreeEnd),
+    );
+    if (projects.length === 0) {
+      new Notice('No projects in this document.');
+      return;
+    }
+    new ProjectSuggestModal(
+      this.plugin.app,
+      projects,
+      (target: Item) => {
+        const result = moveBranchToProject(docLines(view.editor.state), item.line, target.line, 4);
+        if (result) {
+          dispatchOutlineEdit(view.editor, result);
+          view.editor.focus();
+        }
+      },
+      'Move to project',
+    ).open();
+  }
+
+  /** Prompt for a natural-language date and set @due(date)/@start(date) on selected lines. */
+  tagWithDate(view: TaskPaperView, name: 'due' | 'start'): void {
+    const title = name === 'due' ? 'Tag with due' : 'Tag with start';
+    new DateModal(this.plugin.app, title, (iso) => {
+      this.applyToSelectedLines(view.editor, (text) => setTagValue(text, name, iso));
+    }).open();
+  }
+
+  /** Prompt for a natural-language date and insert the resolved ISO date at the cursor. */
+  insertDate(view: TaskPaperView): void {
+    new DateModal(this.plugin.app, 'Insert date', (iso) => {
+      const range = view.editor.state.selection.main;
+      view.editor.dispatch({
+        changes: { from: range.from, to: range.to, insert: iso },
+        selection: EditorSelection.cursor(range.from + iso.length),
+        scrollIntoView: true,
+      });
+      view.editor.focus();
+    }).open();
+  }
+
+  /** Strip every @tag from the selected lines. */
+  removeTags(view: TaskPaperView): void {
+    this.applyToSelectedLines(view.editor, (text) => removeAllTags(text));
+  }
+
+  /** Step the sidebar focus up one level (ancestor project), or clear it at top level. */
+  focusOut(view: TaskPaperView): void {
+    if (view.focusedLine === null) {
+      return;
+    }
+    const outline = outlineOf(view.editor.state);
+    const parentLine = focusOutTarget(outline, view.focusedLine);
+    if (parentLine === null) {
+      this.clearFocus(view);
+      return;
+    }
+    view.focusedLine = parentLine;
+    view.editor.dispatch({
+      effects: setFilterEffect.of({
+        mode: 'focus',
+        visible: focusVisibleLines(outline, parentLine),
+        hide: this.settings.filterHidesInsteadOfDims,
+      }),
+      selection: EditorSelection.cursor(view.editor.state.doc.line(parentLine + 1).from),
+      scrollIntoView: true,
+    });
+    this.plugin.refreshSidebar();
   }
 
   focus(view: TaskPaperView): void {
@@ -304,6 +455,17 @@ export class TaskPaperCommands {
       editor.dispatch({ changes });
     }
   }
+}
+
+/** Smallest [first, last] 0-based line range covering every selection range. */
+function selectedLineRange(state: EditorState): [number, number] {
+  let start = Infinity;
+  let end = -1;
+  for (const range of state.selection.ranges) {
+    start = Math.min(start, state.doc.lineAt(range.from).number - 1);
+    end = Math.max(end, state.doc.lineAt(range.to).number - 1);
+  }
+  return [start, end];
 }
 
 function isWithin(item: Item, ancestor: Item): boolean {

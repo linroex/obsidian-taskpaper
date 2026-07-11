@@ -55,6 +55,24 @@ export function projectsToFold(outline: Outline, line: number): number[] {
 }
 
 /**
+ * The line of the nearest ancestor project of the currently focused item —
+ * the target of "Focus out" — or null when the item is top-level (or gone),
+ * meaning focus should be cleared entirely.
+ */
+export function focusOutTarget(outline: Outline, line: number): number | null {
+  const target = targetAt(outline, line);
+  if (!target) {
+    return null;
+  }
+  for (let a = target.parent; a; a = a.parent) {
+    if (a.kind === 'project') {
+      return a.line;
+    }
+  }
+  return null;
+}
+
+/**
  * Decide the next focus target when a project is clicked: clicking the already
  * focused project clears focus (returns null), otherwise focuses it.
  */
