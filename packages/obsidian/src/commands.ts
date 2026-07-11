@@ -12,13 +12,17 @@ import {
   groupItems,
   hasTag,
   indentItem,
+  indentItemOnly,
   Item,
   ItemKind,
   itemAtLine,
   moveBranchToProject,
   moveItemDown,
+  moveItemOnlyDown,
+  moveItemOnlyUp,
   moveItemUp,
   outdentItem,
+  outdentItemOnly,
   planArchiveDone,
   removeAllTags,
   removeTag,
@@ -32,18 +36,24 @@ import { outlineOf } from './editor/outline';
 import { setFilterEffect } from './editor/filter';
 import {
   foldedRangeAtLine,
+  linesToCollapseCompletely,
   linesToCollapseDeepestLevel,
   linesToExpandShallowestLevel,
   subtreeFoldRange,
 } from './editor/folding';
 import { applyOutlineOp, dispatchOutlineEdit, docLines } from './editor/outlineEdit';
+import { copyDisplayed } from './editor/copyDisplayed';
+import { contractSelection, expandSelection, selectBranch } from './editor/selection';
+import { collectTagNames } from './editor/tagComplete';
 import {
   DateModal,
-  QueryModal,
   ProjectSuggestModal,
+  QueryModal,
   SaveSearchModal,
   SearchEntry,
   SearchSuggestModal,
+  StagedTag,
+  TagMultiSelectModal,
   TextPromptModal,
 } from './modals';
 import type TaskPaperPlugin from './main';
@@ -67,23 +77,15 @@ export class TaskPaperCommands {
     );
   }
 
+  /** Tag with… — multi-select over the known tags (document tags + defaults);
+   *  every staged toggle is applied to the selected lines at once. Plain
+   *  single-tag typing still works: type `@name(value)` and press Enter. */
   toggleTag(view: TaskPaperView): void {
-    const modal = new QueryModal(this.plugin.app, 'flag', (input) => {
-      if (!input) {
-        return;
-      }
-      const match = /^@?([A-Za-z0-9._-]+)(?:\((.*)\))?$/.exec(input.trim());
-      if (!match) {
-        new Notice(`"${input}" is not a valid tag.`);
-        return;
-      }
-      const name = match[1];
-      const value = match[2];
-      this.applyToSelectedLines(view.editor, (text) =>
-        hasTag(text, name) ? removeTag(text, name) : addTag(text, name, value),
-      );
-    });
-    modal.open();
+    const names = collectTagNames(outlineOf(view.editor.state));
+    new TagMultiSelectModal(this.plugin.app, names, (tags) => {
+      applyTagToggles(view.editor, tags);
+      view.editor.focus();
+    }).open();
   }
 
   newTask(view: TaskPaperView): void {
@@ -216,6 +218,29 @@ export class TaskPaperCommands {
     this.applyToSelectedLines(view.editor, (text) => removeAllTags(text));
   }
 
+  /** Copy the currently visible lines (after any filter/focus) as TaskPaper
+   *  text (original Edit > Copy Displayed). */
+  copyDisplayed(view: TaskPaperView): void {
+    void copyDisplayed(view.editor).then((ok) => {
+      new Notice(ok ? '已複製顯示中的項目。' : '無法複製到剪貼簿。');
+    });
+  }
+
+  /** Expand the selection to the current item's whole branch. */
+  selectBranch(view: TaskPaperView): void {
+    selectBranch(view.editor);
+  }
+
+  /** Stepwise selection growth: word → line → branch → parent's branch → document. */
+  expandSelection(view: TaskPaperView): void {
+    expandSelection(view.editor);
+  }
+
+  /** Undo the last Expand Selection step. */
+  contractSelection(view: TaskPaperView): void {
+    contractSelection(view.editor);
+  }
+
   /** Step the sidebar focus up one level (ancestor project), or clear it at top level. */
   focusOut(view: TaskPaperView): void {
     if (view.focusedLine === null) {
@@ -321,6 +346,21 @@ export class TaskPaperCommands {
     applyOutlineOp(view.editor, outdentItem);
   }
 
+  // Single-item moves (original 'Move' vs 'Move Branch'): only the item's
+  // line relocates — its former subtree stays where it is.
+  moveOnlyUp(view: TaskPaperView): void {
+    applyOutlineOp(view.editor, moveItemOnlyUp);
+  }
+  moveOnlyDown(view: TaskPaperView): void {
+    applyOutlineOp(view.editor, moveItemOnlyDown);
+  }
+  indentOnly(view: TaskPaperView): void {
+    applyOutlineOp(view.editor, indentItemOnly);
+  }
+  outdentOnly(view: TaskPaperView): void {
+    applyOutlineOp(view.editor, outdentItemOnly);
+  }
+
   saveSearch(view: TaskPaperView): void {
     new SaveSearchModal(this.plugin.app, (name, query) => {
       const state = view.editor.state;
@@ -390,6 +430,30 @@ export class TaskPaperCommands {
     foldedRanges(state).between(start, end, (from, to) => {
       effects.push(unfoldEffect.of({ from, to }));
     });
+    if (effects.length > 0) {
+      view.editor.dispatch({ effects });
+    }
+  }
+
+  /** Fold the selected item AND every foldable descendant, so expanding one
+   *  level later still shows collapsed children (original Collapse items
+   *  completely — the complement of expandItemsCompletely). */
+  collapseItemsCompletely(view: TaskPaperView): void {
+    const item = this.selectedItem(view);
+    if (!item) {
+      return;
+    }
+    const state = view.editor.state;
+    const effects: StateEffect<unknown>[] = [];
+    for (const line of linesToCollapseCompletely(outlineOf(state).items, item.line)) {
+      if (foldedRangeAtLine(state, line)) {
+        continue;
+      }
+      const range = subtreeFoldRange(state, line);
+      if (range) {
+        effects.push(foldEffect.of(range));
+      }
+    }
     if (effects.length > 0) {
       view.editor.dispatch({ effects });
     }
@@ -520,31 +584,53 @@ export class TaskPaperCommands {
     editor: EditorView,
     transform: (text: string) => string | null,
   ): void {
-    const state = editor.state;
-    const seen = new Set<number>();
-    const changes: ChangeSpec[] = [];
-    for (const range of state.selection.ranges) {
-      const startLine = state.doc.lineAt(range.from).number;
-      const endLine = state.doc.lineAt(range.to).number;
-      for (let n = startLine; n <= endLine; n++) {
-        if (seen.has(n)) {
-          continue;
-        }
-        seen.add(n);
-        const line = state.doc.line(n);
-        if (line.text.trim().length === 0) {
-          continue;
-        }
-        const next = transform(line.text);
-        if (next !== null && next !== line.text) {
-          changes.push({ from: line.from, to: line.to, insert: next });
-        }
+    applyToSelectedLines(editor, transform);
+  }
+}
+
+/** Apply a line transform to every non-blank line touched by the selection. */
+export function applyToSelectedLines(
+  editor: EditorView,
+  transform: (text: string) => string | null,
+): void {
+  const state = editor.state;
+  const seen = new Set<number>();
+  const changes: ChangeSpec[] = [];
+  for (const range of state.selection.ranges) {
+    const startLine = state.doc.lineAt(range.from).number;
+    const endLine = state.doc.lineAt(range.to).number;
+    for (let n = startLine; n <= endLine; n++) {
+      if (seen.has(n)) {
+        continue;
+      }
+      seen.add(n);
+      const line = state.doc.line(n);
+      if (line.text.trim().length === 0) {
+        continue;
+      }
+      const next = transform(line.text);
+      if (next !== null && next !== line.text) {
+        changes.push({ from: line.from, to: line.to, insert: next });
       }
     }
-    if (changes.length > 0) {
-      editor.dispatch({ changes });
-    }
   }
+  if (changes.length > 0) {
+    editor.dispatch({ changes });
+  }
+}
+
+/** Toggle every staged tag on the selected lines at once: a line that has
+ *  the tag loses it, a line that lacks it gains it (with the staged value). */
+export function applyTagToggles(editor: EditorView, tags: StagedTag[]): void {
+  if (tags.length === 0) {
+    return;
+  }
+  applyToSelectedLines(editor, (text) =>
+    tags.reduce(
+      (acc, t) => (hasTag(acc, t.name) ? removeTag(acc, t.name) : addTag(acc, t.name, t.value)),
+      text,
+    ),
+  );
 }
 
 /** Smallest [first, last] 0-based line range covering every selection range. */

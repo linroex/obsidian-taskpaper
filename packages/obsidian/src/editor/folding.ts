@@ -73,6 +73,25 @@ function hasFoldedAncestor(
 }
 
 /**
+ * "Collapse items completely" (complement of Expand items completely): the
+ * 0-based lines to fold so the item at `lineNo` AND every foldable
+ * descendant collapse — expanding one level later still shows collapsed
+ * children. (Pure; testable.)
+ */
+export function linesToCollapseCompletely(
+  items: readonly LevelFoldItem[],
+  lineNo: number,
+): number[] {
+  const item = items.find((i) => i.line === lineNo);
+  if (!item) {
+    return [];
+  }
+  return items
+    .filter((i) => i.line >= item.line && i.line <= item.subtreeEnd && i.subtreeEnd > i.line)
+    .map((i) => i.line);
+}
+
+/**
  * "Collapse all by level": each press folds every visible item at the deepest
  * outline level that still shows expanded children. Returns the 0-based lines
  * to fold — empty when everything is already collapsed. (Pure; testable.)

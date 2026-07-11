@@ -1,4 +1,4 @@
-import { App, FuzzySuggestModal, Modal } from 'obsidian';
+import { App, FuzzySuggestModal, Modal, Notice } from 'obsidian';
 import { Item, parseQuery, resolveDateExpression } from '@taskpaper/core';
 
 /** Prompts for a TaskPaper query. Calls onSubmit(query) or onSubmit(null) to clear. */
@@ -236,6 +236,138 @@ export class DateModal extends Modal {
     const buttons = contentEl.createDiv({ cls: 'modal-button-container' });
     const ok = buttons.createEl('button', { text: 'OK', cls: 'mod-cta' });
     ok.addEventListener('click', submit);
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
+/** A tag staged in the Tag with… modal ('' / undefined value = bare @name). */
+export interface StagedTag {
+  name: string;
+  value?: string;
+}
+
+const TAG_INPUT_RE = /^@?([A-Za-z0-9._-]+)(?:\((.*)\))?$/;
+
+/**
+ * "Tag with…" multi-select (original: Shift-Up/Down in the tag palette
+ * selects several tags): lists the known tag names (document tags +
+ * defaults) as checkbox rows. Interactions:
+ *
+ *  - clicking a row toggles that tag in the staged set (modal stays open)
+ *  - typing filters the list; Enter with text stages the typed tag
+ *    (custom `@name(value)` accepted) and clears the input
+ *  - Enter with an EMPTY input, Mod-Enter, or the 套用 button applies every
+ *    staged toggle to the selected lines at once and closes
+ */
+export class TagMultiSelectModal extends Modal {
+  private staged = new Map<string, string | undefined>();
+  private listEl!: HTMLElement;
+  private input!: HTMLInputElement;
+
+  constructor(
+    app: App,
+    private knownNames: string[],
+    private onSubmit: (tags: StagedTag[]) => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.createEl('h3', { text: 'Tag with…' });
+    contentEl.createDiv({
+      cls: 'tp-tag-multi-hint',
+      text: '點選切換標籤；輸入後按 Enter 加入自訂標籤；Enter（空白輸入）、Mod-Enter 或「套用」套用全部。',
+    });
+
+    this.input = contentEl.createEl('input', { type: 'text' });
+    this.input.placeholder = 'flag   |   @priority(1)';
+    this.input.addClass('tp-tag-multi-input');
+    this.input.style.width = '100%';
+    this.input.addEventListener('input', () => this.renderList());
+    this.input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        this.stageTyped();
+        this.apply();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (this.input.value.trim().length === 0) {
+          this.apply();
+        } else {
+          this.stageTyped();
+        }
+      } else if (e.key === 'Escape') {
+        this.close();
+      }
+    });
+    window.setTimeout(() => this.input.focus(), 0);
+
+    this.listEl = contentEl.createDiv({ cls: 'tp-tag-multi-list' });
+    this.renderList();
+
+    const buttons = contentEl.createDiv({ cls: 'modal-button-container' });
+    const ok = buttons.createEl('button', { text: '套用', cls: 'mod-cta' });
+    ok.addEventListener('click', () => this.apply());
+    const cancel = buttons.createEl('button', { text: '取消' });
+    cancel.addEventListener('click', () => this.close());
+  }
+
+  /** Toggle a tag's presence in the staged set (staying open). */
+  private toggle(name: string, value?: string): void {
+    if (this.staged.has(name)) {
+      this.staged.delete(name);
+    } else {
+      this.staged.set(name, value);
+    }
+    this.renderList();
+  }
+
+  /** Stage the tag typed in the input, if any (custom @name(value) accepted). */
+  private stageTyped(): void {
+    const raw = this.input.value.trim();
+    if (raw.length === 0) {
+      return;
+    }
+    const match = TAG_INPUT_RE.exec(raw);
+    if (!match) {
+      new Notice(`"${raw}" is not a valid tag.`);
+      return;
+    }
+    this.input.value = '';
+    this.toggle(match[1], match[2]);
+  }
+
+  private apply(): void {
+    if (this.staged.size > 0) {
+      this.onSubmit([...this.staged].map(([name, value]) => ({ name, value })));
+    }
+    this.close();
+  }
+
+  private renderList(): void {
+    const filter = this.input.value.trim().replace(/^@/, '').toLowerCase();
+    // Staged custom names appear in the list too, so they can be un-toggled.
+    const names = [...new Set([...this.knownNames, ...this.staged.keys()])].sort();
+    this.listEl.empty();
+    for (const name of names) {
+      if (filter.length > 0 && !name.toLowerCase().includes(filter)) {
+        continue;
+      }
+      const staged = this.staged.has(name);
+      const row = this.listEl.createDiv({
+        cls: 'tp-tag-multi-row',
+        attr: { 'data-tag': name },
+      });
+      row.toggleClass('is-staged', staged);
+      row.createSpan({ cls: 'tp-tag-multi-check', text: staged ? '☑' : '☐' });
+      const value = this.staged.get(name);
+      row.createSpan({ text: value ? `@${name}(${value})` : `@${name}` });
+      row.addEventListener('click', () => this.toggle(name));
+    }
   }
 
   onClose(): void {

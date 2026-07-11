@@ -6,14 +6,19 @@ import { parseDate, resolveDateExpression } from '../src/dates';
 import {
   moveItemUp,
   moveItemDown,
+  moveItemOnlyUp,
+  moveItemOnlyDown,
   indentItem,
+  indentItemOnly,
   outdentItem,
+  outdentItemOnly,
   setLineKind,
   groupItems,
   duplicateBranch,
   deleteBranch,
   moveBranchToProject,
 } from '../src/outlineOps';
+import { expandSelectionRange, selectBranchRange } from '../src/selection';
 import { projectStats, documentCounts, rewriteSearchLine, savedSearches, tagNamesToValues } from '../src/analysis';
 import {
   ancestorProjectPath,
@@ -309,6 +314,93 @@ const out = outdentItem(ol, 3, 4); // outdent "- two-child"
 check('outdent removes one tab', out !== null && out.lines[3] === '\t- two-child', JSON.stringify(out?.lines));
 check('moveUp first child returns null', moveItemUp(ol, 1, 4) === null);
 check('outdent at margin returns null', outdentItem(ol, 0, 4) === null);
+
+// --- single-item moves (only the item line moves; its subtree stays) ---
+const mo = [
+  'A:',
+  '\t- prev',
+  '\t\t- prevchild',
+  '\t- item',
+  '\t\t- child1',
+  '\t\t- child2',
+  '\t- next',
+  '\t\t- nextchild',
+];
+const moUp = moveItemOnlyUp(mo, 3, 4);
+check(
+  'moveItemOnlyUp moves the line above the previous sibling',
+  moUp !== null && moUp.lines[1] === '\t- item' && moUp.lines[2] === '\t- prev' && moUp.cursorLine === 1,
+  JSON.stringify(moUp?.lines),
+);
+check(
+  'moveItemOnlyUp does NOT drag the children',
+  moUp !== null && moUp.lines[4] === '\t\t- child1' && moUp.lines[5] === '\t\t- child2',
+  JSON.stringify(moUp?.lines),
+);
+check('moveItemOnlyUp keeps the line count', moUp !== null && moUp.lines.length === mo.length);
+const moDown = moveItemOnlyDown(mo, 3, 4);
+check(
+  'moveItemOnlyDown moves the line below the next sibling branch',
+  moDown !== null && moDown.lines[7] === '\t- item' && moDown.cursorLine === 7,
+  JSON.stringify(moDown?.lines),
+);
+check(
+  'moveItemOnlyDown leaves the children in place',
+  moDown !== null && moDown.lines[3] === '\t\t- child1' && moDown.lines[4] === '\t\t- child2',
+  JSON.stringify(moDown?.lines),
+);
+check('moveItemOnlyUp at first sibling returns null', moveItemOnlyUp(mo, 1, 4) === null);
+check('moveItemOnlyDown at last sibling returns null', moveItemOnlyDown(mo, 6, 4) === null);
+const moIndent = indentItemOnly(mo, 3, 4);
+check(
+  'indentItemOnly indents just the item line',
+  moIndent !== null && moIndent.lines[3] === '\t\t- item' && moIndent.lines[4] === '\t\t- child1',
+  JSON.stringify(moIndent?.lines),
+);
+const moOutdent = outdentItemOnly(mo, 3, 4);
+check(
+  'outdentItemOnly outdents just the item line',
+  moOutdent !== null && moOutdent.lines[3] === '- item' && moOutdent.lines[4] === '\t\t- child1',
+  JSON.stringify(moOutdent?.lines),
+);
+check('outdentItemOnly at margin returns null', outdentItemOnly(mo, 0, 4) === null);
+check(
+  'outdentItemOnly trims up to tabSize spaces',
+  outdentItemOnly(['A:', '      - spaced'], 1, 4)?.lines[1] === '  - spaced',
+);
+
+// --- selection ranges (Select Branch / Expand Selection) ---
+const selDoc = [
+  'Inbox:',
+  '\t- alpha @today',
+  'Work:',
+  '\t- ship',
+  '\t\t- childA',
+  '\t\t- childB',
+  '\t- review',
+];
+const rangeEq = (
+  r: { startLine: number; startCol: number; endLine: number; endCol: number } | null,
+  e: [number, number, number, number],
+) => r !== null && r.startLine === e[0] && r.startCol === e[1] && r.endLine === e[2] && r.endCol === e[3];
+
+check('selectBranch on a leaf is its own line', rangeEq(selectBranchRange(selDoc, 4, 4, 4), [4, 0, 4, 10]));
+check('selectBranch covers the subtree', rangeEq(selectBranchRange(selDoc, 4, 3, 3), [3, 0, 5, 10]));
+check(
+  'selectBranch climbs until the span is covered',
+  rangeEq(selectBranchRange(selDoc, 4, 3, 6), [2, 0, 6, 9]),
+);
+check('selectBranch on an empty doc returns null', selectBranchRange([''], 4, 0, 0) === null);
+
+const selAt = (sl: number, sc: number, el: number, ec: number) =>
+  expandSelectionRange(selDoc, 4, { startLine: sl, startCol: sc, endLine: el, endCol: ec });
+check('expand: cursor -> word', rangeEq(selAt(3, 5, 3, 5), [3, 3, 3, 7]));
+check('expand: cursor on non-word -> full line', rangeEq(selAt(1, 0, 1, 0), [1, 0, 1, 15]));
+check('expand: word -> full line', rangeEq(selAt(3, 3, 3, 7), [3, 0, 3, 7]));
+check('expand: line -> branch', rangeEq(selAt(3, 0, 3, 7), [3, 0, 5, 10]));
+check('expand: branch -> parent branch', rangeEq(selAt(3, 0, 5, 10), [2, 0, 6, 9]));
+check('expand: root branch -> whole document', rangeEq(selAt(2, 0, 6, 9), [0, 0, 6, 9]));
+check('expand: whole document -> null', selAt(0, 0, 6, 9) === null);
 
 // --- format conversions ---
 check('task -> project', setLineKind('\t- buy milk', 'project') === '\tbuy milk:');
