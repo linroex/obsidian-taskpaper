@@ -226,6 +226,12 @@ check('url opens as-is', linkHref({ kind: 'url', text: 'https://a.com' }) === 'h
   );
   const none = tagCompletionSource(new CompletionContext(EditorState.create({ doc: '- plain' }), 7, false));
   check('no completions without an @ token', none === null);
+  // @ inside an email/URL is not a tag-token boundary — no popup.
+  const emailDoc = '- mail user@exa';
+  const email = tagCompletionSource(new CompletionContext(EditorState.create({ doc: emailDoc }), emailDoc.length, false));
+  check('no completions inside an email address', email === null);
+  const solStart = tagCompletionSource(new CompletionContext(EditorState.create({ doc: '@to' }), 3, false));
+  check('completions at start of line still fire', solStart !== null);
 }
 
 // --- backspace un-indents at the start of an item's text ---

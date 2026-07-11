@@ -30,6 +30,14 @@ export function tagCompletionSource(context: CompletionContext): CompletionResul
   if (!match) {
     return null;
   }
+  // Only at a tag-token boundary: start of line or after whitespace — never
+  // inside emails (user@host) or URLs.
+  if (match.from > 0) {
+    const before = context.state.sliceDoc(match.from - 1, match.from);
+    if (!/[\s]/.test(before)) {
+      return null;
+    }
+  }
   const options: Completion[] = collectTagNames(outlineOf(context.state)).map((name) => ({
     label: `@${name}`,
     type: 'keyword',

@@ -1,4 +1,4 @@
-import { RangeSetBuilder } from '@codemirror/state';
+import { RangeSetBuilder, Text } from '@codemirror/state';
 import {
   Decoration,
   DecorationSet,
@@ -164,6 +164,10 @@ class HandleDrag {
   private moved = false;
   private done = false;
   private readonly startY: number;
+  /** Document the current plan was computed against — a plan is only
+   *  committed while the document is still identical (edits between the last
+   *  mousemove and mouseup would otherwise be overwritten). */
+  private planDoc: Text;
 
   private readonly onMove = (e: MouseEvent) => this.update(e);
   private readonly onUp = () => this.finish(true);
@@ -183,9 +187,15 @@ class HandleDrag {
     private onClick: () => void,
   ) {
     this.startY = startEvent.clientY;
+    this.planDoc = view.state.doc;
     window.addEventListener('mousemove', this.onMove);
     window.addEventListener('mouseup', this.onUp);
     window.addEventListener('keydown', this.onKey, true);
+  }
+
+  /** Abort the gesture (view destroyed, or the document changed mid-drag). */
+  cancel(): void {
+    this.finish(false);
   }
 
   private update(e: MouseEvent): void {
@@ -198,6 +208,7 @@ class HandleDrag {
     const pos = this.view.posAtCoords({ x: e.clientX, y: e.clientY }, false);
     const hoverLine = this.view.state.doc.lineAt(pos).number - 1;
     this.plan = planHandleDrag(docLines(this.view), this.itemLine, hoverLine, 4);
+    this.planDoc = this.view.state.doc;
     this.drawIndicator();
   }
 
@@ -241,7 +252,7 @@ class HandleDrag {
       this.onClick();
       return;
     }
-    if (this.plan) {
+    if (this.plan && this.view.state.doc.eq(this.planDoc)) {
       const state = this.view.state;
       const br = state.lineBreak;
       let anchor = 0;
@@ -258,34 +269,46 @@ class HandleDrag {
 }
 
 /** Handle dot at the start of items with children: click folds, drag moves. */
-export const itemHandles = [
-  ViewPlugin.fromClass(
-    class {
-      decorations: DecorationSet;
-      constructor(view: EditorView) {
-        this.decorations = buildHandleDecorations(view);
+export const itemHandles = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    /** The live drag session, so destroy()/edits can abort it (no window-
+     *  listener leak, no stale plan committing over newer edits). */
+    activeDrag: HandleDrag | null = null;
+    constructor(view: EditorView) {
+      this.decorations = buildHandleDecorations(view);
+    }
+    update(update: ViewUpdate) {
+      if (update.docChanged && this.activeDrag) {
+        this.activeDrag.cancel();
+        this.activeDrag = null;
       }
-      update(update: ViewUpdate) {
-        if (update.docChanged || update.viewportChanged) {
-          this.decorations = buildHandleDecorations(update.view);
+      if (update.docChanged || update.viewportChanged) {
+        this.decorations = buildHandleDecorations(update.view);
+      }
+    }
+    destroy() {
+      this.activeDrag?.cancel();
+      this.activeDrag = null;
+    }
+  },
+  {
+    decorations: (v) => v.decorations,
+    eventHandlers: {
+      mousedown(event, view) {
+        const target = event.target instanceof HTMLElement ? event.target : null;
+        if (!target || event.button !== 0 || !target.classList.contains('tp-handle')) {
+          return false;
         }
-      }
+        const line = Number(target.getAttribute('data-line'));
+        if (Number.isNaN(line)) {
+          return false;
+        }
+        event.preventDefault();
+        this.activeDrag?.cancel();
+        this.activeDrag = new HandleDrag(view, line, event, () => toggleHandleFold(view, line));
+        return true;
+      },
     },
-    { decorations: (v) => v.decorations },
-  ),
-  EditorView.domEventHandlers({
-    mousedown(event, view) {
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      if (!target || event.button !== 0 || !target.classList.contains('tp-handle')) {
-        return false;
-      }
-      const line = Number(target.getAttribute('data-line'));
-      if (Number.isNaN(line)) {
-        return false;
-      }
-      event.preventDefault();
-      new HandleDrag(view, line, event, () => toggleHandleFold(view, line));
-      return true;
-    },
-  }),
-];
+  },
+);

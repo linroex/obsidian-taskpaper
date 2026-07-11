@@ -69,6 +69,15 @@ export class TaskPaperView extends TextFileView {
       return;
     }
     let path = href.replace(/^file:\/\//, '');
+    if (href.startsWith('file://')) {
+      // file:// URLs are percent-encoded (e.g. %20 for spaces) — decode before
+      // handing the path to the OS shell.
+      try {
+        path = decodeURIComponent(path);
+      } catch {
+        // malformed escape — keep the raw text
+      }
+    }
     if (path.startsWith('~')) {
       const home = (globalThis as { process?: { env?: { HOME?: string } } }).process?.env?.HOME;
       if (home) {
