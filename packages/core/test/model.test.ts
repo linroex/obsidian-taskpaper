@@ -200,6 +200,15 @@ check('nl last monday', iso('last monday') === '2026-07-06', String(iso('last mo
 check('nl garbage -> null', iso('blorp') === null);
 check('parseDate query use', !Number.isNaN(parseDate('next week', ref)));
 
+// Invalid components are rejected, not silently normalized by Date.
+check('invalid day 2026-02-31 -> null', iso('2026-02-31') === null, String(iso('2026-02-31')));
+check('invalid month 2026-13 -> null', iso('2026-13') === null, String(iso('2026-13')));
+check('invalid month day nov 32 -> null', iso('nov 32') === null, String(iso('nov 32')));
+// Date.parse fallback only accepts explicit ISO-with-timezone / RFC 2822.
+check('garbage with a year -> NaN', Number.isNaN(parseDate('hello 2026', ref)));
+check('iso with timezone still parses', !Number.isNaN(parseDate('2026-07-09T12:00:00Z', ref)));
+check('rfc 2822 still parses', !Number.isNaN(parseDate('Thu, 09 Jul 2026 12:00:00 GMT', ref)));
+
 // --- TaskPaper 3 date syntax parity (same fixed Thu 2026-07-09 reference) ---
 // Sanity: plain `today` still resolves at LOCAL midnight.
 check('today is local midnight ts', parseDate('today', ref) === new Date(2026, 6, 9).getTime());

@@ -131,6 +131,20 @@ function midnight(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
+/** Build a local Date and reject inputs the Date constructor would silently
+ *  normalize (2026-02-31 → Mar 3, month 13 → next January, nov 32 → Dec 2). */
+function makeValidDate(
+  year: number,
+  month: number,
+  day: number,
+  hours = 0,
+  minutes = 0,
+  seconds = 0,
+): Date | null {
+  const d = new Date(year, month, day, hours, minutes, seconds);
+  return d.getFullYear() === year && d.getMonth() === month && d.getDate() === day ? d : null;
+}
+
 function weekdayIndex(word: string): number | undefined {
   const full = WEEKDAYS.indexOf(word);
   if (full >= 0) {
@@ -215,7 +229,7 @@ function parseExpression(input: string, now: Date): Date | null {
     matchedBase = true;
   } else if ((m = eat(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ t](\d{1,2}):(\d{2})(?::(\d{2}))?)?(?!\d)/))) {
     // Full ISO date, optionally with a time — always local, never UTC.
-    cur = new Date(
+    cur = makeValidDate(
       Number(m[1]),
       Number(m[2]) - 1,
       Number(m[3]),
@@ -223,9 +237,15 @@ function parseExpression(input: string, now: Date): Date | null {
       m[5] ? Number(m[5]) : 0,
       m[6] ? Number(m[6]) : 0,
     );
+    if (!cur || (m[4] && Number(m[4]) > 23) || (m[5] && Number(m[5]) > 59) || (m[6] && Number(m[6]) > 59)) {
+      return null;
+    }
     matchedBase = true;
   } else if ((m = eat(/^(\d{4})-(\d{1,2})(?![\d-])/))) {
-    cur = new Date(Number(m[1]), Number(m[2]) - 1, 1); // month start
+    cur = makeValidDate(Number(m[1]), Number(m[2]) - 1, 1); // month start
+    if (!cur) {
+      return null;
+    }
     matchedBase = true;
   } else if (peek(OFFSET_RE)) {
     // Pure duration offset ("+1 week", "3 days"): base is today's midnight;
@@ -251,7 +271,10 @@ function parseExpression(input: string, now: Date): Date | null {
         cur = monthFrom(now, MONTHS[word], qualifier);
         const dm = eat(MONTH_DAY_RE);
         if (dm) {
-          cur = new Date(cur.getFullYear(), cur.getMonth(), Number(dm[1]));
+          cur = makeValidDate(cur.getFullYear(), cur.getMonth(), Number(dm[1]));
+          if (!cur) {
+            return null; // e.g. "nov 32", "feb 30"
+          }
         }
         matchedBase = true;
       } else if (qualifier && (word === 'week' || word === 'month' || word === 'year')) {
@@ -317,6 +340,18 @@ function parseExpression(input: string, now: Date): Date | null {
       cur = addMonths(cur, n);
     } else if (unit === 'year') {
       cur = addMonths(cur, n * 12);
+    } else if (unit === 'day' || unit === 'week') {
+      // Calendar arithmetic, not fixed milliseconds — "+1 day" must keep the
+      // wall-clock time across DST transitions.
+      const days = unit === 'week' ? n * 7 : n;
+      cur = new Date(
+        cur.getFullYear(),
+        cur.getMonth(),
+        cur.getDate() + days,
+        cur.getHours(),
+        cur.getMinutes(),
+        cur.getSeconds(),
+      );
     } else {
       cur = new Date(cur.getTime() + n * UNIT_MS[unit]);
     }
@@ -355,13 +390,18 @@ export function parseDate(value: string, now: Date = new Date()): number {
   if (d) {
     return d.getTime();
   }
-  // Fallback for formats outside the grammar (RFC dates, ISO with timezone).
-  // Only when an explicit 4-digit year is present — V8's lenient parser
-  // otherwise turns garbage like "next 5" into dates in the year 2001.
-  if (!/\d{4}/.test(value)) {
+  // Fallback for formats outside the grammar, restricted to two explicitly
+  // recognized shapes — V8's lenient Date.parse would otherwise accept
+  // garbage like "hello 2026" as a real date:
+  //   - ISO 8601 with timezone: 2026-07-08T12:00:00Z, 2026-07-08T12:00+08:00
+  //   - RFC 2822:               Tue, 07 Jul 2026 12:00:00 GMT
+  const isoTz = /^\d{4}-\d{2}-\d{2}t\d{2}:\d{2}(:\d{2}(\.\d+)?)?(z|[+-]\d{2}:?\d{2})$/i;
+  const rfc2822 = /^[a-z]{3},?\s+\d{1,2}\s+[a-z]{3}\s+\d{4}\b/i;
+  const t = value.trim();
+  if (!isoTz.test(t) && !rfc2822.test(t)) {
     return NaN;
   }
-  const parsed = Date.parse(value);
+  const parsed = Date.parse(t);
   return Number.isNaN(parsed) ? NaN : parsed;
 }
 
