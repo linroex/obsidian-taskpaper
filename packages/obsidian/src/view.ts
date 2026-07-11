@@ -8,7 +8,7 @@ import { indentItem, moveItemDown, moveItemUp, outdentItem } from '@taskpaper/co
 import { highlightPlugin } from './editor/highlight';
 import { taskpaperFolding } from './editor/folding';
 import { filterExtension, setFilterEffect } from './editor/filter';
-import { taskpaperKeymap } from './editor/keymap';
+import { escapeClearsFilter, taskpaperKeymap } from './editor/keymap';
 import { applyOutlineOp } from './editor/outlineEdit';
 import { tagClickExtension } from './editor/tagClick';
 import { linkExtension, LinkKind } from './editor/links';
@@ -62,9 +62,39 @@ export class TaskPaperView extends TextFileView {
     this.editor?.destroy();
   }
 
-  /** Open a clicked link: http/mailto via the browser, files via the OS shell. */
+  /**
+   * Resolve a `./` or `../` path against the folder containing this file.
+   * Returns an absolute OS path on desktop (FileSystemAdapter), or null when
+   * that isn't available (e.g. mobile).
+   */
+  private resolveRelativePath(rel: string): string | null {
+    const folder = this.file?.parent?.path ?? '';
+    const parts = folder === '/' ? [] : folder.split('/').filter((p) => p.length > 0);
+    for (const seg of rel.split('/')) {
+      if (seg === '' || seg === '.') {
+        continue;
+      } else if (seg === '..') {
+        parts.pop();
+      } else {
+        parts.push(seg);
+      }
+    }
+    const vaultPath = parts.join('/');
+    // Desktop's FileSystemAdapter can map a vault path to a full OS path.
+    const adapter = this.app.vault.adapter as unknown as {
+      getFullPath?: (normalizedPath: string) => string;
+    };
+    if (typeof adapter.getFullPath === 'function') {
+      return adapter.getFullPath(vaultPath);
+    }
+    return null;
+  }
+
+  /** Open a clicked link: http/mailto/scheme via the browser/OS, files via the OS shell. */
   private openLink(href: string, kind: LinkKind): void {
     if (kind !== 'file' && kind !== 'path') {
+      // Includes generic `scheme:` URIs (obsidian://, x-devonthink://, …),
+      // which window.open hands to the OS / the registered app.
       window.open(href);
       return;
     }
@@ -83,6 +113,13 @@ export class TaskPaperView extends TextFileView {
       if (home) {
         path = home + path.slice(1);
       }
+    }
+    if (/^\.\.?\//.test(path)) {
+      const resolved = this.resolveRelativePath(path);
+      if (resolved === null) {
+        return; // no way to reach the OS filesystem here — fail quietly
+      }
+      path = resolved;
     }
     try {
       // Obsidian desktop exposes Electron; shell.openPath is the safe way to
@@ -122,7 +159,13 @@ export class TaskPaperView extends TextFileView {
       taskpaperFolding,
       highlightPlugin,
       filterExtension,
-      itemHandles,
+      itemHandles({
+        hide: () => this.plugin.settings.filterHidesInsteadOfDims,
+        onFocus: (line) => {
+          this.focusedLine = line;
+          this.plugin.refreshSidebar();
+        },
+      }),
       tagAutocomplete,
       search({ top: true }),
       // The search panel is user-facing UI — localize it like the rest.
@@ -189,6 +232,23 @@ export class TaskPaperView extends TextFileView {
           this.plugin.refreshSidebar();
         }
       }),
+      // LAST in the stack, so the search panel's and autocomplete's own
+      // Escape bindings win while they are open (TaskPaper 3: Escape ends
+      // the editor search — here it clears the active filter/focus).
+      keymap.of([
+        {
+          key: 'Escape',
+          run: (v) => {
+            if (!escapeClearsFilter(v.state)) {
+              return false;
+            }
+            this.focusedLine = null;
+            v.dispatch({ effects: setFilterEffect.of(null) });
+            this.plugin.refreshSidebar();
+            return true;
+          },
+        },
+      ]),
     ];
 
     this.editor = new EditorView({

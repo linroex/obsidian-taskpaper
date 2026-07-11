@@ -1,5 +1,16 @@
+import { EditorState } from '@codemirror/state';
 import { EditorView, KeyBinding } from '@codemirror/view';
 import { lineKind } from '@taskpaper/core';
+import { isFilterActive } from './filter';
+
+/**
+ * Whether Escape should clear the active filter/focus (TaskPaper 3: Escape
+ * ends the editor search). False lets Escape fall through to other bindings.
+ * (Pure; testable.)
+ */
+export function escapeClearsFilter(state: EditorState): boolean {
+  return isFilterActive(state);
+}
 
 /** Enter on a task line continues the list with a new `- ` item at the same indent. */
 const continueTask: KeyBinding = {
@@ -85,4 +96,27 @@ const backspaceUnindent: KeyBinding = {
   },
 };
 
-export const taskpaperKeymap: KeyBinding[] = [continueTask, backspaceUnindent];
+/**
+ * Option-Enter inserts a plain newline without auto-formatting (TaskPaper 3:
+ * "Press Option-Return to avoid auto-formatting"). We keep the current line's
+ * indentation — the item stays at its outline level, consistent with the
+ * plain-Enter handler above — but never add a `- ` task marker.
+ */
+const plainNewline: KeyBinding = {
+  key: 'Alt-Enter',
+  run(view: EditorView): boolean {
+    const { state } = view;
+    const sel = state.selection.main;
+    const line = state.doc.lineAt(sel.from);
+    const indent = /^[\t ]*/.exec(line.text)?.[0] ?? '';
+    const insert = `\n${indent}`;
+    view.dispatch({
+      changes: { from: sel.from, to: sel.to, insert },
+      selection: { anchor: sel.from + insert.length },
+      scrollIntoView: true,
+    });
+    return true;
+  },
+};
+
+export const taskpaperKeymap: KeyBinding[] = [continueTask, plainNewline, backspaceUnindent];

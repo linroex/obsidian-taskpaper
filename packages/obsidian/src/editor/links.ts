@@ -1,7 +1,8 @@
 import { Extension, RangeSetBuilder } from '@codemirror/state';
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate } from '@codemirror/view';
+import { parseTags } from '@taskpaper/core';
 
-export type LinkKind = 'url' | 'www' | 'email' | 'file' | 'path';
+export type LinkKind = 'url' | 'www' | 'email' | 'file' | 'path' | 'scheme';
 
 export interface LinkRange {
   /** Start offset within the line. */
@@ -13,9 +14,13 @@ export interface LinkRange {
   text: string;
 }
 
-// One alternative per link kind; order matters (url before path so `://` wins).
+// One alternative per link kind; order matters (url/file/www before the
+// generic scheme so they keep their specific kinds, paths last).
+//  - scheme: two+ chars before the `:` so `C:\` (drive letters) never match,
+//    and it must start with a letter so times (`16:15`) never match.
+//  - path: `/`, `~/`, `./` and `../` prefixes, with `\ `-escaped spaces.
 const LINK_RE =
-  /(https?:\/\/[^\s]+)|(file:\/\/[^\s]+)|(www\.[^\s]+)|([A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})|(~?\/[^\s]+)/g;
+  /(https?:\/\/[^\s]+)|(file:\/\/[^\s]+)|(www\.[^\s]+)|([A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})|([A-Za-z][A-Za-z0-9+.-]+:[^\s]+)|((?:\.\.?|~)?\/(?:\\ |[^\s])+)/g;
 
 /** Characters that end a sentence and shouldn't be swallowed into a link. */
 const TRAILING = /[.,;:!?'"”』」)>\]]+$/;
@@ -23,6 +28,13 @@ const TRAILING = /[.,;:!?'"”』」)>\]]+$/;
 /** Find every clickable link in a single line of text (pure; testable). */
 export function findLinks(lineText: string): LinkRange[] {
   const links: LinkRange[] = [];
+  // Tag ranges, so a generic `scheme:path` never swallows a tag value
+  // (`@z(note:abc)` stays a clickable tag, not a link).
+  let tagRanges: { start: number; end: number }[] | null = null;
+  const insideTag = (from: number, to: number): boolean => {
+    tagRanges ??= parseTags(lineText).map((t) => ({ start: t.start, end: t.end }));
+    return tagRanges.some((t) => from >= t.start && to <= t.end);
+  };
   LINK_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = LINK_RE.exec(lineText))) {
@@ -49,9 +61,23 @@ export function findLinks(lineText: string): LinkRange[] {
     if (text.length === 0) {
       continue;
     }
-    const kind: LinkKind = m[1] ? 'url' : m[2] ? 'file' : m[3] ? 'www' : m[4] ? 'email' : 'path';
+    const kind: LinkKind = m[1]
+      ? 'url'
+      : m[2]
+        ? 'file'
+        : m[3]
+          ? 'www'
+          : m[4]
+            ? 'email'
+            : m[5]
+              ? 'scheme'
+              : 'path';
     // A bare `/` or `~/` isn't a path.
-    if (kind === 'path' && text.replace(/^~/, '').length < 2) {
+    if (kind === 'path' && text.replace(/^(?:\.\.?|~)/, '').length < 2) {
+      continue;
+    }
+    // Generic schemes inside a tag (`@x(...)`) belong to the tag, not a link.
+    if (kind === 'scheme' && insideTag(m.index, m.index + text.length)) {
       continue;
     }
     links.push({ start: m.index, end: m.index + text.length, kind, text });
@@ -67,7 +93,8 @@ export function linkHref(link: Pick<LinkRange, 'kind' | 'text'>): string {
     case 'email':
       return `mailto:${link.text}`;
     case 'path':
-      return `file://${link.text}`;
+      // Backslash-escaped spaces (`./my\ file.txt`) are unescaped before opening.
+      return `file://${link.text.replace(/\\ /g, ' ')}`;
     default:
       return link.text;
   }

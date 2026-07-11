@@ -35,11 +35,30 @@ function buildDecorations(view: EditorView): DecorationSet {
           cls += ' tp-tag-overdue';
         }
       }
-      builder.add(
-        line.from + tag.start,
-        line.from + tag.end,
-        Decoration.mark({ class: cls, attributes: { 'data-tag': tag.name } }),
-      );
+      // Two marks per valued tag (TaskPaper 3): clicking the `@name` part
+      // searches the tag, clicking the `(value)` part searches tag + value.
+      const nameEnd = tag.start + 1 + tag.name.length;
+      if (tag.value !== undefined && nameEnd < tag.end) {
+        builder.add(
+          line.from + tag.start,
+          line.from + nameEnd,
+          Decoration.mark({ class: cls, attributes: { 'data-tag': tag.name } }),
+        );
+        builder.add(
+          line.from + nameEnd,
+          line.from + tag.end,
+          Decoration.mark({
+            class: cls + ' tp-tag-value',
+            attributes: { 'data-tag': tag.name, 'data-tag-value': tag.value },
+          }),
+        );
+      } else {
+        builder.add(
+          line.from + tag.start,
+          line.from + tag.end,
+          Decoration.mark({ class: cls, attributes: { 'data-tag': tag.name } }),
+        );
+      }
     }
   }
 

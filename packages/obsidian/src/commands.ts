@@ -1,7 +1,7 @@
 import { Notice } from 'obsidian';
-import { ChangeSpec, EditorSelection, EditorState } from '@codemirror/state';
+import { ChangeSpec, EditorSelection, EditorState, StateEffect } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { foldAll, foldEffect, unfoldAll } from '@codemirror/language';
+import { foldAll, foldEffect, foldedRanges, unfoldAll, unfoldEffect } from '@codemirror/language';
 import {
   addTag,
   deleteBranch,
@@ -27,6 +27,12 @@ import {
 } from '@taskpaper/core';
 import { outlineOf } from './editor/outline';
 import { setFilterEffect } from './editor/filter';
+import {
+  foldedRangeAtLine,
+  linesToCollapseDeepestLevel,
+  linesToExpandShallowestLevel,
+  subtreeFoldRange,
+} from './editor/folding';
 import { applyOutlineOp, dispatchOutlineEdit, docLines } from './editor/outlineEdit';
 import { DateModal, QueryModal, ProjectSuggestModal, SaveSearchModal, TextPromptModal } from './modals';
 import type TaskPaperPlugin from './main';
@@ -344,6 +350,95 @@ export class TaskPaperCommands {
 
   unfoldAll(view: TaskPaperView): void {
     unfoldAll(view.editor);
+  }
+
+  /** Fold the selected item's subtree (original Outline > Collapse items). */
+  collapseItems(view: TaskPaperView): void {
+    const item = this.selectedItem(view);
+    if (!item || foldedRangeAtLine(view.editor.state, item.line)) {
+      return;
+    }
+    const range = subtreeFoldRange(view.editor.state, item.line);
+    if (range) {
+      view.editor.dispatch({ effects: foldEffect.of(range) });
+    }
+  }
+
+  /** Unfold the selected item's subtree (original Outline > Expand items). */
+  expandItems(view: TaskPaperView): void {
+    const item = this.selectedItem(view);
+    const existing = item && foldedRangeAtLine(view.editor.state, item.line);
+    if (existing) {
+      view.editor.dispatch({ effects: unfoldEffect.of(existing) });
+    }
+  }
+
+  /** Unfold the selected item and every descendant (original Expand items completely). */
+  expandItemsCompletely(view: TaskPaperView): void {
+    const item = this.selectedItem(view);
+    if (!item) {
+      return;
+    }
+    const state = view.editor.state;
+    const start = state.doc.line(item.line + 1).from;
+    const end = state.doc.line(item.subtreeEnd + 1).to;
+    const effects: StateEffect<unknown>[] = [];
+    foldedRanges(state).between(start, end, (from, to) => {
+      effects.push(unfoldEffect.of({ from, to }));
+    });
+    if (effects.length > 0) {
+      view.editor.dispatch({ effects });
+    }
+  }
+
+  /** Fold every item at the deepest expanded level (original Shift-Cmd-9). */
+  collapseAllByLevel(view: TaskPaperView): void {
+    const state = view.editor.state;
+    const outline = outlineOf(state);
+    const lines = linesToCollapseDeepestLevel(outline.items, this.foldedItemLines(state));
+    const effects = [];
+    for (const line of lines) {
+      const range = subtreeFoldRange(state, line);
+      if (range) {
+        effects.push(foldEffect.of(range));
+      }
+    }
+    if (effects.length > 0) {
+      view.editor.dispatch({ effects });
+    }
+  }
+
+  /** Unfold every item at the shallowest folded level (original Shift-Cmd-0). */
+  expandAllByLevel(view: TaskPaperView): void {
+    const state = view.editor.state;
+    const outline = outlineOf(state);
+    const lines = linesToExpandShallowestLevel(outline.items, this.foldedItemLines(state));
+    const effects = [];
+    for (const line of lines) {
+      const existing = foldedRangeAtLine(state, line);
+      if (existing) {
+        effects.push(unfoldEffect.of(existing));
+      }
+    }
+    if (effects.length > 0) {
+      view.editor.dispatch({ effects });
+    }
+  }
+
+  /** The item under the primary cursor, if any. */
+  private selectedItem(view: TaskPaperView): Item | undefined {
+    const state = view.editor.state;
+    const curLine = state.doc.lineAt(state.selection.main.head).number - 1;
+    return itemAtLine(outlineOf(state), curLine);
+  }
+
+  /** Lines (0-based) whose subtree fold is currently collapsed. */
+  private foldedItemLines(state: EditorState): Set<number> {
+    const folded = new Set<number>();
+    foldedRanges(state).between(0, state.doc.length, (from) => {
+      folded.add(state.doc.lineAt(from).number - 1);
+    });
+    return folded;
   }
 
   archiveDone(view: TaskPaperView): void {
