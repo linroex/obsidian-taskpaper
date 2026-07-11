@@ -71,6 +71,70 @@ const qd = (query: string) => [...runQuery(query, dueToday)].length;
 check('due today matches = today [d]', qd('@due = today [d]') === 1, String(qd('@due = today [d]')));
 check('due today matches <= today [d]', qd('@due <= today [d]') === 1, String(qd('@due <= today [d]')));
 
+// --- advanced queries: set operations, slices, [l] lists, @id ---
+// line:  0            1            2                     3     4       5                  6                    7                        8                       9                        10
+const advDoc = [
+  'Inbox:',
+  '\t- a1 @today',
+  '\t- a2 @due(2020-01-01)',
+  '\t- a3',
+  'Work:',
+  '\t- done parent @done',
+  '\t\t- child of done',
+  '\t\t\t- grandchild of done',
+  '\t- open @priority(1,2)',
+  '\t- open2 @priority(3)',
+  '\t- open3 @today @done',
+];
+const adv = buildOutline(advDoc, 4);
+// Strip trailing tags from display text so expectations stay short.
+const qa = (query: string) => [...runQuery(query, adv)].map((i) => i.displayText.replace(/\s*@\S+/g, '')).sort();
+
+// Set operations (lowest precedence, left-associative).
+check('union with mod after relation', qa('@today union @due <[d] tomorrow').join(',') === 'a1,a2,open3', qa('@today union @due <[d] tomorrow').join(','));
+check(
+  'except drops done subtrees',
+  qa('not @done except @done//*').join(',') === 'Inbox,Work,a1,a2,a3,open,open2',
+  qa('not @done except @done//*').join(','),
+);
+check(
+  'parenthesized path union then except',
+  qa('(project Inbox//* union //@today) except //@done').join(',') === 'Inbox,a1,a2,a3',
+  qa('(project Inbox//* union //@today) except //@done').join(','),
+);
+check('intersect', qa('@today intersect @done').join(',') === 'open3', qa('@today intersect @done').join(','));
+check('set ops associate left', qa('@today union @due except @done').join(',') === 'a1,a2', qa('@today union @due except @done').join(','));
+check('predicate parens still group', qa('task and not (@done or @today)').join(',') === 'a2,a3,child of done,grandchild of done,open,open2', qa('task and not (@done or @today)').join(','));
+check('leading predicate paren backtracks', qa('(@today or @done) and task').join(',') === 'a1,done parent,open3', qa('(@today or @done) and task').join(','));
+
+// Result slicing (JS Array.slice semantics; [N] picks the single Nth match).
+check('slice first task', qa('task[0]').join(',') === 'a1', qa('task[0]').join(','));
+check('slice negative index', qa('task[-1]').join(',') === 'open3', qa('task[-1]').join(','));
+check('slice range', qa('task[0:2]').join(',') === 'a1,a2', qa('task[0:2]').join(','));
+check('slice open start', qa('task[:2]').join(',') === 'a1,a2', qa('task[:2]').join(','));
+check('slice open end', qa('task[6:]').join(',') === 'open,open2,open3', qa('task[6:]').join(','));
+check('slice negative range', qa('task[-2:]').join(',') === 'open2,open3', qa('task[-2:]').join(','));
+check('slice out of range empty', qa('task[99]').length === 0, qa('task[99]').join(','));
+// Slices apply per evaluation context: the first not-done task of EACH project.
+check(
+  'per-context slice keeps one per project',
+  qa('project *//task and not @done[0]').join(',') === 'a1,child of done',
+  qa('project *//task and not @done[0]').join(','),
+);
+check('per-context slice example from guide', qa('project *//not @done[0]').join(',') === 'Inbox,Work', qa('project *//not @done[0]').join(','));
+
+// [l] list modifier: value is a comma-separated list, ANY element may match.
+check('[l] contains element', qa('@priority contains[l] 1').join(',') === 'open', qa('@priority contains[l] 1').join(','));
+check('[l] equals element', qa('@priority =[l] 2').join(',') === 'open', qa('@priority =[l] 2').join(','));
+check('[ln] numeric per element', qa('@priority <[ln] 2').join(',') === 'open', qa('@priority <[ln] 2').join(','));
+check('[ln] matches whole list too', qa('@priority =[ln] 3').join(',') === 'open2', qa('@priority =[ln] 3').join(','));
+check('[l] no match', qa('@priority =[l] 9').length === 0, qa('@priority =[l] 9').join(','));
+
+// @id: items have no persisted id, so it is the 0-based line number as a string.
+check('@id equality', qa('@id = 1').join(',') === 'a1', qa('@id = 1').join(','));
+check('@id numeric compare', qa('@id <[n] 3').join(',') === 'Inbox,a1,a2', qa('@id <[n] 3').join(','));
+check('@id present on all items', qa('@id').length === adv.items.length, String(qa('@id').length));
+
 // --- tag helpers ---
 check('addTag done', addTag('- foo', 'done', '2026-07-08') === '- foo @done(2026-07-08)');
 check('addTag idempotent value replace', addTag('- foo @done(2026-01-01)', 'done', '2026-07-08') === '- foo @done(2026-07-08)');

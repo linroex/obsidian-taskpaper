@@ -32,20 +32,38 @@ export type Predicate =
   | { t: 'type'; kind: 'project' | 'task' | 'note' | 'item' }
   | { t: 'text'; value: string };
 
+/** Set operations combining two item-path expressions (lowest precedence). */
+export type SetOp = 'union' | 'intersect' | 'except';
+
+/** Trailing result slice on a step, JS Array.slice-style. */
+export interface Slice {
+  /** `[N]` — select the single Nth (0-based) match; negatives count from the end. */
+  index?: number;
+  /** `[start:end]` bounds; either side may be omitted. */
+  start?: number;
+  end?: number;
+}
+
 export interface Step {
   /** How candidates are drawn from each context node before filtering. */
   sep: 'child' | 'descendant';
   /** Explicit axis override (from `axis::`). */
   axis?: Axis;
   pred: Predicate;
+  /** Optional `[N]` / `[start:end]` slice applied to this step's matches. */
+  slice?: Slice;
 }
 
-export interface Query {
-  steps: Step[];
-}
+export type Query =
+  | { t: 'path'; steps: Step[] }
+  | { t: SetOp; a: Query; b: Query };
 
 const RELATION_WORDS = new Set(['contains', 'beginswith', 'endswith', 'matches']);
 const TYPE_WORDS = new Set(['project', 'task', 'note', 'item']);
+const SET_OP_WORDS = new Set(['union', 'intersect', 'except']);
+// A `[...]` group is a slice when it holds only digits, `-` and `:` (relation
+// modifiers are letters).
+const SLICE_RE = /^(-?\d+|(-?\d+)?:(-?\d+)?)$/;
 const AXIS_WORDS = new Set<string>([
   'child',
   'descendant',
@@ -80,6 +98,56 @@ class Parser {
   }
 
   parseQuery(): Query {
+    const query = this.parsePathExpr();
+    if (this.peek()) {
+      throw new Error(`Unexpected token "${this.peek()!.value}" in query`);
+    }
+    return query;
+  }
+
+  // Set operations have the lowest precedence and associate left.
+  private parsePathExpr(): Query {
+    let left = this.parsePathTerm();
+    while (this.peekSetOp()) {
+      const op = this.next()!.value.toLowerCase() as SetOp;
+      const right = this.parsePathTerm();
+      left = { t: op, a: left, b: right };
+    }
+    return left;
+  }
+
+  // A parenthesis may wrap a whole path expression (`(a//b union //c)`) or
+  // merely group a predicate (`(a or b) and c`). Try the path-expression
+  // reading first and backtrack when the paren turns out to be grouping.
+  private parsePathTerm(): Query {
+    if (this.peek()?.type === 'lparen') {
+      const save = this.i;
+      this.next();
+      try {
+        const inner = this.parsePathExpr();
+        const close = this.next();
+        if (close?.type === 'rparen' && this.atPathTermEnd()) {
+          return inner;
+        }
+      } catch {
+        // Fall through and re-parse as a predicate paren.
+      }
+      this.i = save;
+    }
+    return this.parsePath();
+  }
+
+  private atPathTermEnd(): boolean {
+    const t = this.peek();
+    return !t || t.type === 'rparen' || this.peekSetOp();
+  }
+
+  private peekSetOp(): boolean {
+    const t = this.peek();
+    return !!t && t.type === 'word' && SET_OP_WORDS.has(t.value.toLowerCase());
+  }
+
+  private parsePath(): Query {
     const steps: Step[] = [];
 
     // Leading separator determines whether we start from root children or all items.
@@ -100,10 +168,7 @@ class Parser {
       steps.push(this.parseStep(sep));
     }
 
-    if (this.peek()) {
-      throw new Error(`Unexpected token "${this.peek()!.value}" in query`);
-    }
-    return { steps };
+    return { t: 'path', steps };
   }
 
   private parseStep(sep: 'child' | 'descendant'): Step {
@@ -116,7 +181,8 @@ class Parser {
       axis = t.value.toLowerCase() as Axis;
     }
     const pred = this.parseOr();
-    return { sep, axis, pred };
+    const slice = this.readSlice();
+    return { sep, axis, pred, slice };
   }
 
   private parseOr(): Predicate {
@@ -168,7 +234,7 @@ class Parser {
       if (w === 'and' || w === 'or') {
         return false;
       }
-      if (RELATION_WORDS.has(w)) {
+      if (RELATION_WORDS.has(w) || SET_OP_WORDS.has(w)) {
         return false;
       }
       // An axis word directly followed by :: belongs to the next step, not this predicate.
@@ -198,9 +264,7 @@ class Parser {
     if (t.type === 'tag') {
       const rel = this.tryReadRelation();
       if (rel) {
-        const value = this.readValue();
-        const mods = this.readMods();
-        return { t: 'cmp', attr: t.value, rel, value, mods };
+        return this.finishComparison(t.value, rel);
       }
       return { t: 'has', attr: t.value };
     }
@@ -211,21 +275,32 @@ class Parser {
 
     if (t.type === 'word') {
       const w = t.value.toLowerCase();
+      // `*` is the universal predicate: any item.
+      if (w === '*') {
+        return { t: 'type', kind: 'item' };
+      }
       if (TYPE_WORDS.has(w)) {
         return { t: 'type', kind: w as 'project' | 'task' | 'note' | 'item' };
       }
       // `attr relation value` where attr is a plain identifier (text, type, line, level...)
       const rel = this.tryReadRelation();
       if (rel) {
-        const value = this.readValue();
-        const mods = this.readMods();
-        return { t: 'cmp', attr: t.value, rel, value, mods };
+        return this.finishComparison(t.value, rel);
       }
       // Otherwise a bare text-search term.
       return { t: 'text', value: t.value };
     }
 
     throw new Error(`Unexpected token "${t.value}" in query`);
+  }
+
+  // Modifiers may follow the relation (`<[d] tomorrow`, TaskPaper-style) or
+  // trail the value (`<= today [d]`); accept both.
+  private finishComparison(attr: string, rel: Relation): Predicate {
+    const before = this.readMods();
+    const value = this.readValue();
+    const after = this.readMods();
+    return { t: 'cmp', attr, rel, value, mods: before + after };
   }
 
   private tryReadRelation(): Relation | undefined {
@@ -260,10 +335,27 @@ class Parser {
 
   private readMods(): string {
     const t = this.peek();
-    if (t && t.type === 'mod') {
+    // Letter groups only — digit/colon groups are slices and belong to the step.
+    if (t && t.type === 'mod' && /^[A-Za-z]+$/.test(t.value)) {
       this.next();
       return t.value.toLowerCase();
     }
     return '';
+  }
+
+  private readSlice(): Slice | undefined {
+    const t = this.peek();
+    if (!t || t.type !== 'mod' || !SLICE_RE.test(t.value)) {
+      return undefined;
+    }
+    this.next();
+    if (!t.value.includes(':')) {
+      return { index: parseInt(t.value, 10) };
+    }
+    const [startText, endText] = t.value.split(':');
+    return {
+      start: startText === '' ? undefined : parseInt(startText, 10),
+      end: endText === '' ? undefined : parseInt(endText, 10),
+    };
   }
 }
