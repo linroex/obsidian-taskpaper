@@ -12,7 +12,7 @@ import {
   toggleFocusTarget,
 } from '@taskpaper/core';
 import { outlineOf } from './editor/outline';
-import { setFilterEffect } from './editor/filter';
+import { filterSpecField, setFilterEffect } from './editor/filter';
 import { SaveSearchModal } from './modals';
 import { GlobalSearch, parseTagList, settingsSignature, sidebarSignature, visibleTagCounts } from './sidebarLogic';
 import type TaskPaperPlugin from './main';
@@ -59,9 +59,19 @@ export class TaskPaperSidebarView extends ItemView {
   render(force = false): void {
     const view = this.plugin.lastActiveView;
     const settingsKey = settingsSignature(this.plugin.settings);
+    // The active query filter (from any source: sidebar, editor tag click,
+    // Filter… command) — the single source of truth for row highlighting.
+    const spec = view?.editor ? (view.editor.state.field(filterSpecField, false) ?? null) : null;
+    const activeQuery = spec && spec.mode === 'query' ? spec.query : null;
     const signature =
       view && view.editor
-        ? sidebarSignature(view.file?.path ?? '?', view.editor.state.doc.length, view.focusedLine, settingsKey)
+        ? sidebarSignature(
+            view.file?.path ?? '?',
+            view.editor.state.doc.length,
+            view.focusedLine,
+            settingsKey,
+            activeQuery,
+          )
         : sidebarSignature(null, 0, null, settingsKey);
     if (!force && signature === this.renderedSignature) {
       return;
@@ -100,25 +110,33 @@ export class TaskPaperSidebarView extends ItemView {
       );
       menu.showAtMouseEvent(e);
     });
+    // Apply a query filter — or clear it when that exact query is already
+    // active (same click-again-to-cancel gesture as projects).
+    const toggleQuery = (query: string) => {
+      view.focusedLine = null;
+      view.editor.dispatch({
+        effects: setFilterEffect.of(
+          activeQuery === query
+            ? null
+            : { mode: 'query', query, hide: this.plugin.settings.filterHidesInsteadOfDims },
+        ),
+      });
+      this.app.workspace.revealLeaf(view.leaf);
+      this.plugin.refreshSidebar();
+    };
     const addSearch = (name: string, query: string, global: boolean): HTMLElement => {
       const el = searchSection.createDiv({
         cls: global ? 'tp-sb-item tp-sb-search tp-sb-search-global' : 'tp-sb-item tp-sb-search',
       });
+      if (activeQuery === query) {
+        el.addClass('is-focused');
+      }
       el.createSpan({ cls: 'tp-sb-search-name', text: name });
       if (global) {
         el.createSpan({ cls: 'tp-sb-global-badge', text: '全域' });
       }
       el.setAttr('title', query);
-      el.onclick = () => {
-        view.editor.dispatch({
-          effects: setFilterEffect.of({
-            mode: 'query',
-            query,
-            hide: this.plugin.settings.filterHidesInsteadOfDims,
-          }),
-        });
-        this.app.workspace.revealLeaf(view.leaf);
-      };
+      el.onclick = () => toggleQuery(query);
       return el;
     };
     for (const s of globalSearches) {
@@ -169,30 +187,25 @@ export class TaskPaperSidebarView extends ItemView {
     if (sorted.length === 0) {
       tagSection.createDiv({ cls: 'tp-sb-empty', text: '（無標籤）' });
     }
-    const applyQuery = (query: string) => {
-      view.focusedLine = null;
-      view.editor.dispatch({
-        effects: setFilterEffect.of({
-          mode: 'query',
-          query,
-          hide: this.plugin.settings.filterHidesInsteadOfDims,
-        }),
-      });
-      this.app.workspace.revealLeaf(view.leaf);
-      this.plugin.refreshSidebar();
-    };
     const namesToValues = tagNamesToValues(outline);
     for (const [name, count] of sorted) {
       const el = tagSection.createDiv({ cls: 'tp-sb-item tp-sb-tag' });
+      if (activeQuery === `@${name}`) {
+        el.addClass('is-focused');
+      }
       el.createSpan({ cls: 'tp-sb-tag-name', text: `@${name}` });
       el.createSpan({ cls: 'tp-sb-tag-count', text: String(count) });
-      el.onclick = () => applyQuery(`@${name}`);
+      el.onclick = () => toggleQuery(`@${name}`);
       // Each distinct value is a child row (original sidebar); clicking it
       // filters with `@tag contains[l] "value"` — exactly the original query.
       for (const value of namesToValues.get(name) ?? []) {
+        const query = `@${name} contains[l] ${quoteQueryValue(value)}`;
         const vel = tagSection.createDiv({ cls: 'tp-sb-item tp-sb-tag-value' });
+        if (activeQuery === query) {
+          vel.addClass('is-focused');
+        }
         vel.createSpan({ text: value });
-        vel.onclick = () => applyQuery(`@${name} contains[l] ${quoteQueryValue(value)}`);
+        vel.onclick = () => toggleQuery(query);
       }
     }
   }

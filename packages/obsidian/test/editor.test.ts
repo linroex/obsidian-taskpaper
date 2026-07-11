@@ -101,6 +101,14 @@ const SK = settingsSignature({
   excludeTags: 'search',
 });
 check('signature stable for same inputs', sidebarSignature('a.taskpaper', 100, 3, SK) === sidebarSignature('a.taskpaper', 100, 3, SK));
+check(
+  'signature changes when the active query changes',
+  sidebarSignature('a.taskpaper', 100, null, SK, '@today') !== sidebarSignature('a.taskpaper', 100, null, SK, null),
+);
+check(
+  'signature stable for same active query',
+  sidebarSignature('a.taskpaper', 100, null, SK, '@today') === sidebarSignature('a.taskpaper', 100, null, SK, '@today'),
+);
 check('signature changes when focus changes', sidebarSignature('a.taskpaper', 100, 3, SK) !== sidebarSignature('a.taskpaper', 100, null, SK));
 check('signature changes when doc length changes', sidebarSignature('a.taskpaper', 100, 3, SK) !== sidebarSignature('a.taskpaper', 101, 3, SK));
 check('signature changes when file changes', sidebarSignature('a.taskpaper', 100, 3, SK) !== sidebarSignature('b.taskpaper', 100, 3, SK));

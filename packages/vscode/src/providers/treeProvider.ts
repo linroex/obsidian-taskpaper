@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { projectStats, savedSearches, tagNamesToValues } from '@taskpaper/core';
+import { projectStats, quoteQueryValue, savedSearches, tagNamesToValues } from '@taskpaper/core';
 import { getOutline, tabSizeFor } from '../outline';
 
 type Node =
@@ -18,12 +18,20 @@ export class TaskPaperTreeProvider implements vscode.TreeDataProvider<Node> {
   private timer: NodeJS.Timeout | undefined;
   /** The project line currently focused (per document uri), for the indicator. */
   focused: { uri: string; line: number } | null = null;
+  /** The query filter currently applied (per document uri), for row indicators + toggle. */
+  activeFilter: { uri: string; query: string } | null = null;
+
+  /** True when `query` is the active filter for `uri`. */
+  isActiveFilter(uri: vscode.Uri, query: string): boolean {
+    return this.activeFilter?.uri === uri.toString() && this.activeFilter?.query === query;
+  }
 
   constructor(disposables: vscode.Disposable[]) {
     const track = (editor: vscode.TextEditor | undefined) => {
       if (editor && editor.document.languageId === 'taskpaper') {
         if (this.activeDoc !== editor.document) {
           this.focused = null;
+          this.activeFilter = null;
         }
         this.activeDoc = editor.document;
         this.refresh();
@@ -59,9 +67,10 @@ export class TaskPaperTreeProvider implements vscode.TreeDataProvider<Node> {
     }
     if (node.kind === 'search') {
       const item = new vscode.TreeItem(node.name, vscode.TreeItemCollapsibleState.None);
-      item.iconPath = new vscode.ThemeIcon('search');
-      item.description = node.query;
-      item.tooltip = `Run search: ${node.query}`;
+      const active = this.isActiveFilter(node.uri, node.query);
+      item.iconPath = new vscode.ThemeIcon(active ? 'target' : 'search');
+      item.description = active ? `● ${node.query}` : node.query;
+      item.tooltip = active ? 'Active — click to clear' : `Run search: ${node.query}`;
       item.command = {
         command: 'taskpaper.runSavedSearch',
         title: 'Run saved search',
@@ -99,9 +108,10 @@ export class TaskPaperTreeProvider implements vscode.TreeDataProvider<Node> {
           ? vscode.TreeItemCollapsibleState.Collapsed
           : vscode.TreeItemCollapsibleState.None,
       );
-      item.description = String(node.count);
-      item.iconPath = new vscode.ThemeIcon('tag');
-      item.tooltip = `Filter by @${node.name}`;
+      const active = this.isActiveFilter(node.uri, `@${node.name}`);
+      item.description = active ? `● ${node.count}` : String(node.count);
+      item.iconPath = new vscode.ThemeIcon(active ? 'target' : 'tag');
+      item.tooltip = active ? 'Active — click to clear' : `Filter by @${node.name}`;
       item.command = {
         command: 'taskpaper.filterTag',
         title: 'Filter by tag',
@@ -111,8 +121,12 @@ export class TaskPaperTreeProvider implements vscode.TreeDataProvider<Node> {
     }
     // tag value — clicking filters by tag + value (original sidebar rows).
     const item = new vscode.TreeItem(node.value, vscode.TreeItemCollapsibleState.None);
-    item.iconPath = new vscode.ThemeIcon('symbol-constant');
-    item.tooltip = `Filter by @${node.name} contains[l] "${node.value}"`;
+    const activeValue = this.isActiveFilter(node.uri, `@${node.name} contains[l] ${quoteQueryValue(node.value)}`);
+    item.iconPath = new vscode.ThemeIcon(activeValue ? 'target' : 'symbol-constant');
+    item.description = activeValue ? '●' : undefined;
+    item.tooltip = activeValue
+      ? 'Active — click to clear'
+      : `Filter by @${node.name} contains[l] "${node.value}"`;
     item.command = {
       command: 'taskpaper.filterTag',
       title: 'Filter by tag value',

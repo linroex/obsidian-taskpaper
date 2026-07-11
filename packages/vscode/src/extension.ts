@@ -24,6 +24,22 @@ export function activate(context: vscode.ExtensionContext): void {
   const tree = new TaskPaperTreeProvider(context.subscriptions);
   const statusBar = new TaskPaperStatusBar();
 
+  /** Apply a query from the tree — or clear it when that exact query is
+   *  already active (same click-again-to-cancel gesture as project focus). */
+  const toggleTreeFilter = async (uri: vscode.Uri, query: string, preserveFocus: boolean) => {
+    const doc = await vscode.workspace.openTextDocument(uri);
+    const editor = await vscode.window.showTextDocument(doc, { preserveFocus });
+    if (tree.isActiveFilter(uri, query)) {
+      tree.activeFilter = null;
+      tree.refresh();
+      await clearFocus(editor);
+      return;
+    }
+    await applyFilterQuery(editor, query);
+    tree.activeFilter = { uri: uri.toString(), query };
+    tree.refresh();
+  };
+
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider('taskpaperOutline', tree),
     statusBar,
@@ -42,23 +58,17 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       'taskpaper.filterTag',
       async (uri: vscode.Uri, name: string, value?: string) => {
-        const doc = await vscode.workspace.openTextDocument(uri);
-        const editor = await vscode.window.showTextDocument(doc, { preserveFocus: true });
         const query =
           value === undefined
             ? `@${name}`
             : `@${name} contains[l] ${quoteQueryValue(value)}`;
-        await applyFilterQuery(editor, query);
+        await toggleTreeFilter(uri, query, true);
       },
     ),
 
     vscode.commands.registerCommand(
       'taskpaper.runSavedSearch',
-      async (uri: vscode.Uri, query: string) => {
-        const doc = await vscode.workspace.openTextDocument(uri);
-        const editor = await vscode.window.showTextDocument(doc);
-        await applyFilterQuery(editor, query);
-      },
+      (uri: vscode.Uri, query: string) => toggleTreeFilter(uri, query, false),
     ),
 
     vscode.commands.registerCommand(
@@ -112,6 +122,7 @@ export function activate(context: vscode.ExtensionContext): void {
     registerEditorCommand('taskpaper.focus', focus),
     registerEditorCommand('taskpaper.clearFocus', async (editor) => {
       tree.focused = null;
+      tree.activeFilter = null;
       tree.refresh();
       await clearFocus(editor);
     }),

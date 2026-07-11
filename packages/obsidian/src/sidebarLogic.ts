@@ -25,11 +25,12 @@ export function sidebarSignature(
   docLength: number,
   focusedLine: number | null,
   settingsKey: string,
+  activeQuery: string | null = null,
 ): string {
   if (filePath === null) {
     return 'empty';
   }
-  return `${filePath}|${docLength}|${focusedLine ?? '-'}|${settingsKey}`;
+  return `${filePath}|${docLength}|${focusedLine ?? '-'}|${activeQuery ?? '-'}|${settingsKey}`;
 }
 
 /** Serializes the sidebar-relevant settings into a stable signature component. */
