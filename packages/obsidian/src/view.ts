@@ -1,30 +1,12 @@
 import { setIcon, TextFileView, WorkspaceLeaf } from 'obsidian';
-import { EditorState, Extension } from '@codemirror/state';
-import { drawSelection, EditorView, keymap } from '@codemirror/view';
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
-import { codeFolding, indentUnit } from '@codemirror/language';
-import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
-import {
-  indentItem,
-  moveItemDown,
-  moveItemUp,
-  outdentItem,
-  parseQuery,
-  todayStamp,
-} from '@taskpaper/core';
-import { highlightPlugin } from './editor/highlight';
+import { EditorState } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
+import { parseQuery, todayStamp } from '@taskpaper/core';
 import { outlineOf } from './editor/outline';
-import { taskpaperFolding } from './editor/folding';
-import { filterExtension, filterSpecField, searchbarText, setFilterEffect } from './editor/filter';
-import { escapeClearsFilter, taskpaperKeymap } from './editor/keymap';
-import { applyOutlineOp } from './editor/outlineEdit';
-import { tagClickExtension } from './editor/tagClick';
-import { dashClickExtension } from './editor/dashClick';
-import { indentGuides } from './editor/guides';
+import { filterSpecField, searchbarText, setFilterEffect } from './editor/filter';
+import { createEditorExtensions } from './editor/setup';
 import type { SidebarSelectionItem } from './sidebarLogic';
-import { linkExtension, LinkKind } from './editor/links';
-import { tagAutocomplete } from './editor/tagComplete';
-import { itemHandles } from './editor/handles';
+import type { LinkKind } from './editor/links';
 import type TaskPaperPlugin from './main';
 
 export const VIEW_TYPE_TASKPAPER = 'taskpaper-view';
@@ -250,115 +232,23 @@ export class TaskPaperView extends TextFileView {
 
   private buildEditor(): void {
     this.contentEl.addClass('taskpaper-view');
-    const extensions: Extension[] = [
-      history(),
-      drawSelection(),
-      EditorState.tabSize.of(4),
-      indentUnit.of('\t'),
-      // No fold gutter — the item handle dots toggle folds, like the original.
-      codeFolding(),
-      taskpaperFolding,
-      highlightPlugin,
-      indentGuides,
-      filterExtension,
-      itemHandles({
-        hide: () => this.plugin.settings.filterHidesInsteadOfDims,
-        onFocus: (line) => {
-          this.focusedLine = line;
-          this.plugin.refreshSidebar();
-        },
-      }),
-      tagAutocomplete,
-      search({ top: true }),
-      // The search panel is user-facing UI — localize it like the rest.
-      EditorState.phrases.of({
-        Find: '尋找',
-        Replace: '取代',
-        next: '下一個',
-        previous: '上一個',
-        all: '全部',
-        'match case': '區分大小寫',
-        'by word': '整字比對',
-        regexp: '正則表達式',
-        replace: '取代',
-        'replace all': '全部取代',
-        close: '關閉',
-      }),
-      highlightSelectionMatches(),
-      tagClickExtension({
-        hide: () => this.plugin.settings.filterHidesInsteadOfDims,
-        onToggle: () => {
-          this.focusedLine = null;
-          this.plugin.refreshSidebar();
-        },
-      }),
-      dashClickExtension({
-        stamp: () => todayStamp(this.plugin.settings.doneIncludesTime),
-      }),
-      linkExtension((href, kind) => this.openLink(href, kind)),
-      EditorView.lineWrapping,
-      keymap.of([
-        {
-          key: 'Mod-s',
-          preventDefault: true,
-          run: () => {
-            this.saveNow();
-            return true;
-          },
-        },
-        { key: 'Alt-ArrowUp', preventDefault: true, run: (v) => applyOutlineOp(v, moveItemUp) },
-        { key: 'Alt-ArrowDown', preventDefault: true, run: (v) => applyOutlineOp(v, moveItemDown) },
-        {
-          key: 'Alt-Shift-ArrowRight',
-          preventDefault: true,
-          run: (v) => applyOutlineOp(v, indentItem),
-        },
-        {
-          key: 'Alt-Shift-ArrowLeft',
-          preventDefault: true,
-          run: (v) => applyOutlineOp(v, outdentItem),
-        },
-        ...taskpaperKeymap,
-        ...searchKeymap,
-        indentWithTab,
-        ...defaultKeymap,
-        ...historyKeymap,
-      ]),
-      EditorView.domEventHandlers({
-        blur: () => {
-          this.saveNow();
-          return false;
-        },
-      }),
-      EditorView.updateListener.of((update) => {
-        if (update.docChanged && !this.applyingExternalData) {
-          this.data = update.state.doc.toString();
-          this.requestSave();
-          this.plugin.refreshSidebar();
-        }
-        // Any filter change (sidebar, tag click, commands, Escape) syncs the bar.
-        if (update.transactions.some((tr) => tr.effects.some((e) => e.is(setFilterEffect)))) {
-          this.updateSearchbar();
-        }
-      }),
-      // LAST in the stack, so the search panel's and autocomplete's own
-      // Escape bindings win while they are open (TaskPaper 3: Escape ends
-      // the editor search — here it clears the active filter/focus).
-      keymap.of([
-        {
-          key: 'Escape',
-          run: (v) => {
-            if (!escapeClearsFilter(v.state)) {
-              return false;
-            }
-            this.focusedLine = null;
-            v.dispatch({ effects: setFilterEffect.of(null) });
-            this.plugin.refreshSidebar();
-            return true;
-          },
-        },
-      ]),
-    ];
+    const extensions = createEditorExtensions({
+      hide: () => this.plugin.settings.filterHidesInsteadOfDims,
+      doneStamp: () => todayStamp(this.plugin.settings.doneIncludesTime),
+      setFocusedLine: (line) => {
+        this.focusedLine = line;
+      },
+      refresh: () => this.plugin.refreshSidebar(),
+      updateSearchbar: () => this.updateSearchbar(),
+      applyingExternalData: () => this.applyingExternalData,
+      onDocChanged: (doc) => {
+        this.data = doc;
+        this.requestSave();
+        this.plugin.refreshSidebar();
+      },
+      openLink: (href, kind) => this.openLink(href, kind),
+      saveNow: () => this.saveNow(),
+    });
 
     this.editor = new EditorView({
       state: EditorState.create({ doc: this.data ?? '', extensions }),
