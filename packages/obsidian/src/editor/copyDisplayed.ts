@@ -53,18 +53,24 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
   } catch {
     // fall through to the textarea fallback
   }
+  // Fallback: hidden textarea + execCommand. Restore focus and always remove
+  // the textarea, even when copying throws.
+  const previous = document.activeElement;
+  const ta = document.createElement('textarea');
   try {
-    const ta = document.createElement('textarea');
     ta.value = text;
     ta.style.position = 'fixed';
     ta.style.opacity = '0';
     document.body.appendChild(ta);
     ta.select();
-    const ok = document.execCommand('copy');
-    ta.remove();
-    return ok;
+    return document.execCommand('copy');
   } catch {
     return false;
+  } finally {
+    ta.remove();
+    if (previous instanceof HTMLElement) {
+      previous.focus();
+    }
   }
 }
 

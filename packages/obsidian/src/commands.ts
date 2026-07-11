@@ -89,7 +89,14 @@ export class TaskPaperCommands {
    *  single-tag typing still works: type `@name(value)` and press Enter. */
   toggleTag(view: TaskPaperView): void {
     const names = collectTagNames(outlineOf(view.editor.state));
+    // Snapshot the document — if it changes while the modal is open (sync,
+    // another pane), applying line-based toggles would tag unrelated lines.
+    const docAtOpen = view.editor.state.doc;
     new TagMultiSelectModal(this.plugin.app, names, (tags) => {
+      if (view.editor.state.doc !== docAtOpen) {
+        new Notice('文件已變更，標籤未套用——請重新執行。');
+        return;
+      }
       applyTagToggles(view.editor, tags);
       view.editor.focus();
     }).open();

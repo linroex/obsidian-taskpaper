@@ -89,10 +89,12 @@ export class TaskPaperSidebarView extends ItemView {
     // focused or queried.
     if (view && view.editor && view.sidebarSelection.length > 0) {
       const outline = outlineOf(view.editor.state);
-      view.sidebarSelection = validateSelection(view.sidebarSelection, (line) => {
+      const validated = validateSelection(view.sidebarSelection, (line) => {
         const item = outline.items.find((i) => i.line === line);
         return item?.kind === 'project' ? cleanProjectName(item.displayText) : undefined;
       });
+      const dropped = validated !== view.sidebarSelection;
+      view.sidebarSelection = validated;
       const composed = composeSelection(view.sidebarSelection);
       const matches =
         composed.type === 'none'
@@ -102,6 +104,12 @@ export class TaskPaperSidebarView extends ItemView {
             : spec?.mode === 'query' && spec.query === composed.query;
       if (!matches) {
         view.sidebarSelection = [];
+      }
+      // Validation dropped a stale project/hoist while its line-based filter
+      // is still applied: the hidden set now targets the wrong lines. Clear
+      // it outside this render pass.
+      if (dropped && spec?.mode === 'focus') {
+        window.setTimeout(() => this.clearFocus(view), 0);
       }
     }
     const selection = view?.sidebarSelection ?? [];
@@ -360,6 +368,9 @@ export class TaskPaperSidebarView extends ItemView {
 
   /** Line (0-based) of the project row a drag started from, while dragging. */
   private dragSourceLine: number | null = null;
+  /** The document as it was at dragstart — the drop is rejected if it changed
+   *  (line-based moves would otherwise hit an unrelated branch). */
+  private dragSourceDoc: unknown = null;
 
   /** Whether the pointer sits in the lower half of the row (drop AFTER it). */
   private static dropsAfter(row: HTMLElement, e: DragEvent): boolean {
@@ -379,6 +390,7 @@ export class TaskPaperSidebarView extends ItemView {
   private registerProjectDrag(el: HTMLElement, view: TaskPaperView, line: number): void {
     el.addEventListener('dragstart', (e: DragEvent) => {
       this.dragSourceLine = line;
+      this.dragSourceDoc = view.editor.state.doc;
       el.addClass('tp-sb-dragging');
       if (e.dataTransfer) {
         e.dataTransfer.effectAllowed = 'move';
@@ -392,6 +404,9 @@ export class TaskPaperSidebarView extends ItemView {
     });
     el.addEventListener('dragover', (e: DragEvent) => {
       if (this.dragSourceLine === null || this.dragSourceLine === line) {
+        // Dragging back over the source row: drop any indicator left on the
+        // previously hovered target.
+        this.clearDropMarks();
         return;
       }
       e.preventDefault(); // marks the row as a valid drop target
@@ -410,9 +425,14 @@ export class TaskPaperSidebarView extends ItemView {
       e.preventDefault();
       this.clearDropMarks();
       const source = this.dragSourceLine;
+      const sourceDoc = this.dragSourceDoc;
       this.dragSourceLine = null;
+      this.dragSourceDoc = null;
       if (source === null || source === line) {
         return;
+      }
+      if (sourceDoc !== null && view.editor.state.doc !== sourceDoc) {
+        return; // the document changed mid-drag — lines no longer match
       }
       this.dropProject(view, source, line, TaskPaperSidebarView.dropsAfter(el, e));
     });

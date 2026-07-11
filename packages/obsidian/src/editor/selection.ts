@@ -18,6 +18,9 @@ interface OffsetRange {
 interface ExpandStep {
   before: OffsetRange;
   after: OffsetRange;
+  /** The document the step was computed on — edits invalidate the step
+   *  (offsets in a changed document would restore stale ranges). */
+  doc: unknown;
 }
 
 /**
@@ -84,7 +87,7 @@ export function expandSelection(view: EditorView): boolean {
   }
   const after = toOffsets(state, range);
   const stack = expandStacks.get(view) ?? [];
-  stack.push({ before: { anchor: main.anchor, head: main.head }, after });
+  stack.push({ before: { anchor: main.anchor, head: main.head }, after, doc: state.doc });
   expandStacks.set(view, stack);
   dispatchRange(view, after);
   return true;
@@ -95,7 +98,8 @@ export function contractSelection(view: EditorView): boolean {
   const stack = expandStacks.get(view) ?? [];
   const main = view.state.selection.main;
   const top = stack[stack.length - 1];
-  if (!top || Math.min(top.after.anchor, top.after.head) !== main.from ||
+  if (!top || top.doc !== view.state.doc ||
+      Math.min(top.after.anchor, top.after.head) !== main.from ||
       Math.max(top.after.anchor, top.after.head) !== main.to) {
     // The selection moved on since the last expand — the history is stale.
     expandStacks.delete(view);
