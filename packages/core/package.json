@@ -1,0 +1,17 @@
+{
+  "name": "@taskpaper/core",
+  "version": "0.1.0",
+  "description": "Portable TaskPaper outline model, tag utilities, and item-path query engine.",
+  "license": "MIT",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "private": true,
+  "scripts": {
+    "compile": "tsc -p ./",
+    "test": "esbuild test/model.test.ts --bundle --platform=node --format=cjs --outfile=out-test/test.cjs && node out-test/test.cjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.20.0",
+    "typescript": "^5.4.0"
+  }
+}

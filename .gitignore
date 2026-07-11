@@ -1,0 +1,6 @@
+node_modules/
+packages/vscode/out/
+packages/obsidian/main.js
+packages/obsidian/out-test/
+*.vsix
+.DS_Store

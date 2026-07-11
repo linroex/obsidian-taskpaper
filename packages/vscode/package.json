@@ -1,0 +1,274 @@
+{
+  "name": "taskpaper-vscode",
+  "displayName": "TaskPaper",
+  "description": "Plain-text task management in the TaskPaper format — projects, tasks, notes and tags, with folding, filtering, and a full item-path query language.",
+  "version": "0.1.0",
+  "publisher": "taskpaper-vscode",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "taskpaper",
+    "todo",
+    "task",
+    "outline",
+    "gtd"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "languages": [
+      {
+        "id": "taskpaper",
+        "aliases": [
+          "TaskPaper",
+          "taskpaper"
+        ],
+        "extensions": [
+          ".taskpaper",
+          ".taskpaper.txt"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "taskpaper",
+        "scopeName": "text.taskpaper",
+        "path": "./syntaxes/taskpaper.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "taskpaper",
+        "path": "./snippets/taskpaper.json"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "taskpaper",
+          "title": "TaskPaper",
+          "icon": "media/taskpaper.svg"
+        }
+      ]
+    },
+    "views": {
+      "taskpaper": [
+        {
+          "id": "taskpaperOutline",
+          "name": "Projects & Tags",
+          "icon": "media/taskpaper.svg",
+          "contextualTitle": "TaskPaper"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "taskpaper.toggleDone",
+        "title": "TaskPaper: Toggle Done",
+        "category": "TaskPaper"
+      },
+      {
+        "command": "taskpaper.toggleToday",
+        "title": "TaskPaper: Toggle Today",
+        "category": "TaskPaper"
+      },
+      {
+        "command": "taskpaper.toggleTag",
+        "title": "TaskPaper: Toggle Tag…",
+        "category": "TaskPaper"
+      },
+      {
+        "command": "taskpaper.newTask",
+        "title": "TaskPaper: New Task",
+        "category": "TaskPaper"
+      },
+      {
+        "command": "taskpaper.archiveDone",
+        "title": "TaskPaper: Archive Done Items",
+        "category": "TaskPaper"
+      },
+      {
+        "command": "taskpaper.focus",
+        "title": "TaskPaper: Focus Project",
+        "category": "TaskPaper"
+      },
+      {
+        "command": "taskpaper.clearFocus",
+        "title": "TaskPaper: Clear Focus",
+        "category": "TaskPaper"
+      },
+      {
+        "command": "taskpaper.filter",
+        "title": "TaskPaper: Filter…",
+        "category": "TaskPaper"
+      },
+      {
+        "command": "taskpaper.goToProject",
+        "title": "TaskPaper: Go to Project…",
+        "category": "TaskPaper"
+      },
+      {
+        "command": "taskpaper.foldLevel1",
+        "title": "TaskPaper: Fold to Level 1",
+        "category": "TaskPaper"
+      },
+      {
+        "command": "taskpaper.foldLevel2",
+        "title": "TaskPaper: Fold to Level 2",
+        "category": "TaskPaper"
+      },
+      {
+        "command": "taskpaper.unfoldAll",
+        "title": "TaskPaper: Unfold All",
+        "category": "TaskPaper"
+      },
+      {
+        "command": "taskpaper.saveSearch",
+        "title": "TaskPaper: Save Search…",
+        "category": "TaskPaper"
+      },
+      {
+        "command": "taskpaper.moveUp",
+        "title": "TaskPaper: Move Item Up",
+        "category": "TaskPaper"
+      },
+      {
+        "command": "taskpaper.moveDown",
+        "title": "TaskPaper: Move Item Down",
+        "category": "TaskPaper"
+      },
+      {
+        "command": "taskpaper.indent",
+        "title": "TaskPaper: Indent Item",
+        "category": "TaskPaper"
+      },
+      {
+        "command": "taskpaper.outdent",
+        "title": "TaskPaper: Outdent Item",
+        "category": "TaskPaper"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "taskpaper.moveUp",
+        "key": "alt+up",
+        "when": "editorTextFocus && editorLangId == taskpaper"
+      },
+      {
+        "command": "taskpaper.moveDown",
+        "key": "alt+down",
+        "when": "editorTextFocus && editorLangId == taskpaper"
+      },
+      {
+        "command": "taskpaper.indent",
+        "key": "alt+shift+right",
+        "when": "editorTextFocus && editorLangId == taskpaper"
+      },
+      {
+        "command": "taskpaper.outdent",
+        "key": "alt+shift+left",
+        "when": "editorTextFocus && editorLangId == taskpaper"
+      },
+      {
+        "command": "taskpaper.toggleDone",
+        "key": "cmd+d",
+        "mac": "cmd+d",
+        "win": "ctrl+d",
+        "linux": "ctrl+d",
+        "when": "editorTextFocus && editorLangId == taskpaper"
+      },
+      {
+        "command": "taskpaper.toggleToday",
+        "key": "cmd+t",
+        "mac": "cmd+t",
+        "win": "ctrl+t",
+        "linux": "ctrl+t",
+        "when": "editorTextFocus && editorLangId == taskpaper"
+      },
+      {
+        "command": "taskpaper.filter",
+        "key": "cmd+shift+f",
+        "mac": "cmd+shift+f",
+        "win": "ctrl+shift+alt+f",
+        "linux": "ctrl+shift+alt+f",
+        "when": "editorTextFocus && editorLangId == taskpaper"
+      },
+      {
+        "command": "taskpaper.focus",
+        "key": "cmd+shift+o",
+        "mac": "cmd+shift+o",
+        "win": "ctrl+shift+alt+o",
+        "linux": "ctrl+shift+alt+o",
+        "when": "editorTextFocus && editorLangId == taskpaper"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "when": "editorLangId == taskpaper",
+          "command": "taskpaper.toggleDone",
+          "group": "taskpaper@1"
+        },
+        {
+          "when": "editorLangId == taskpaper",
+          "command": "taskpaper.archiveDone",
+          "group": "taskpaper@2"
+        },
+        {
+          "when": "editorLangId == taskpaper",
+          "command": "taskpaper.filter",
+          "group": "taskpaper@3"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "TaskPaper",
+      "properties": {
+        "taskpaper.doneIncludesTime": {
+          "type": "boolean",
+          "default": false,
+          "description": "When toggling Done, stamp @done with date and time (YYYY-MM-DD HH:mm) instead of date only."
+        },
+        "taskpaper.archiveProjectName": {
+          "type": "string",
+          "default": "Archive",
+          "description": "Name of the project that Archive Done Items collects completed tasks into."
+        },
+        "taskpaper.strikeDoneItems": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show completed (@done) items with a strikethrough and dimmed text."
+        },
+        "taskpaper.dimNonMatchingOnFilter": {
+          "type": "boolean",
+          "default": true,
+          "description": "When a filter/focus is active, dim lines that do not match instead of only folding them."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "esbuild ./src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --target=node16",
+    "watch": "npm run build -- --sourcemap --watch",
+    "compile": "tsc -p ./ --noEmit",
+    "package": "vsce package --no-dependencies --allow-missing-repository"
+  },
+  "dependencies": {
+    "@taskpaper/core": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.24.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.4.0"
+  }
+}

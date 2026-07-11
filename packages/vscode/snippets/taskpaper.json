@@ -1,0 +1,27 @@
+{
+  "Project": {
+    "prefix": "proj",
+    "body": ["${1:Project name}:"],
+    "description": "A TaskPaper project (line ending with a colon)"
+  },
+  "Task": {
+    "prefix": "task",
+    "body": ["- ${1:task}"],
+    "description": "A TaskPaper task"
+  },
+  "Task with Today": {
+    "prefix": "today",
+    "body": ["- ${1:task} @today"],
+    "description": "A task tagged @today"
+  },
+  "Task with Due date": {
+    "prefix": "due",
+    "body": ["- ${1:task} @due(${2:$CURRENT_YEAR-$CURRENT_MONTH-$CURRENT_DATE})"],
+    "description": "A task with a @due date"
+  },
+  "Done tag": {
+    "prefix": "done",
+    "body": ["@done($CURRENT_YEAR-$CURRENT_MONTH-$CURRENT_DATE)"],
+    "description": "A @done tag stamped with today's date"
+  }
+}

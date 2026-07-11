@@ -1,0 +1,22 @@
+Inbox:
+	- Try the TaskPaper extension @today
+	- Read the query docs in the README
+
+Work:
+	- Ship the release @due(2026-07-01) @flag
+		- Write changelog @done(2026-07-06)
+		- Tag the build
+	- Review pull requests @today
+	- Plan next sprint @due(2026-07-15)
+	Notes about the roadmap go here as a plain note.
+
+Home:
+	Errands:
+		- Buy groceries @today
+		- Pick up package @done(2026-07-07)
+	- Call the plumber @priority(1)
+	- Water the plants @done(2026-07-08)
+
+Someday:
+	- Learn to sail
+	- Write a novel @flag

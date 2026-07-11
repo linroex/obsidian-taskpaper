@@ -1,0 +1,91 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "TaskPaper",
+  "scopeName": "text.taskpaper",
+  "patterns": [
+    { "include": "#task" },
+    { "include": "#project" },
+    { "include": "#note" }
+  ],
+  "repository": {
+    "task": {
+      "begin": "^(\\s*)(-)(\\s+)",
+      "beginCaptures": {
+        "2": {
+          "name": "markup.list.unnumbered.taskpaper punctuation.definition.list.begin.taskpaper"
+        }
+      },
+      "end": "$",
+      "name": "meta.task.taskpaper",
+      "patterns": [
+        { "include": "#tags" },
+        { "match": "\\S.*?(?=(\\s+@|$))", "name": "string.unquoted.task.taskpaper" }
+      ]
+    },
+    "project": {
+      "match": "^(\\s*)([^\\n]*?\\S:)(?=(\\s+@[A-Za-z0-9._-]+(\\([^)]*\\))?)*\\s*$)(.*)$",
+      "captures": {
+        "2": {
+          "name": "markup.heading.taskpaper keyword.other.project.taskpaper"
+        },
+        "5": {
+          "patterns": [{ "include": "#tags" }]
+        }
+      }
+    },
+    "note": {
+      "begin": "^(?=\\s*\\S)",
+      "end": "$",
+      "name": "meta.note.taskpaper",
+      "patterns": [
+        { "include": "#tags" },
+        { "match": "\\S.*?(?=(\\s+@|$))", "name": "comment.line.note.taskpaper" }
+      ]
+    },
+    "tags": {
+      "patterns": [
+        { "include": "#tag-done" },
+        { "include": "#tag-today" },
+        { "include": "#tag-due" },
+        { "include": "#tag-generic" }
+      ]
+    },
+    "tag-done": {
+      "match": "(@)(done)\\b(\\()?((?:\\\\.|[^)\\\\])*)?(\\))?",
+      "captures": {
+        "1": { "name": "punctuation.definition.tag.taskpaper" },
+        "2": { "name": "keyword.control.tag.done.taskpaper" },
+        "3": { "name": "punctuation.definition.tag.value.begin.taskpaper" },
+        "4": { "name": "constant.other.date.done.taskpaper" },
+        "5": { "name": "punctuation.definition.tag.value.end.taskpaper" }
+      }
+    },
+    "tag-today": {
+      "match": "(@)(today)\\b",
+      "captures": {
+        "1": { "name": "punctuation.definition.tag.taskpaper" },
+        "2": { "name": "keyword.control.tag.today.taskpaper" }
+      }
+    },
+    "tag-due": {
+      "match": "(@)(due|start)\\b(\\()?((?:\\\\.|[^)\\\\])*)?(\\))?",
+      "captures": {
+        "1": { "name": "punctuation.definition.tag.taskpaper" },
+        "2": { "name": "keyword.control.tag.due.taskpaper" },
+        "3": { "name": "punctuation.definition.tag.value.begin.taskpaper" },
+        "4": { "name": "constant.other.date.due.taskpaper" },
+        "5": { "name": "punctuation.definition.tag.value.end.taskpaper" }
+      }
+    },
+    "tag-generic": {
+      "match": "(@)([A-Za-z0-9._-]+)(\\()?((?:\\\\.|[^)\\\\])*)?(\\))?",
+      "captures": {
+        "1": { "name": "punctuation.definition.tag.taskpaper" },
+        "2": { "name": "entity.name.tag.taskpaper" },
+        "3": { "name": "punctuation.definition.tag.value.begin.taskpaper" },
+        "4": { "name": "string.other.tagvalue.taskpaper" },
+        "5": { "name": "punctuation.definition.tag.value.end.taskpaper" }
+      }
+    }
+  }
+}

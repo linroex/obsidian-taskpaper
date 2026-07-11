@@ -1,0 +1,189 @@
+/* TaskPaper editor styling — keyed to classes emitted by the highlight plugin. */
+
+.taskpaper-view .cm-editor {
+  height: 100%;
+  font-family: var(--font-text);
+}
+
+.taskpaper-view .cm-content {
+  padding: var(--size-4-4);
+  caret-color: var(--text-normal);
+}
+
+.taskpaper-view .cm-focused {
+  outline: none;
+}
+
+/* Cursor (CodeMirror draws its own caret, so give it a theme-aware colour). */
+.taskpaper-view .cm-cursor,
+.taskpaper-view .cm-cursor-primary,
+.taskpaper-view .cm-dropCursor {
+  border-left: 2px solid var(--text-normal);
+}
+
+/* Text selection. */
+.taskpaper-view .cm-selectionBackground,
+.taskpaper-view .cm-content ::selection {
+  background-color: var(--text-selection);
+}
+
+.taskpaper-view .cm-focused .cm-selectionBackground {
+  background-color: var(--text-selection);
+}
+
+/* Active line for a bit of orientation. */
+.taskpaper-view .cm-line {
+  caret-color: var(--text-normal);
+}
+
+/* Projects — bold headings. */
+.tp-project {
+  font-weight: 700;
+  color: var(--text-normal);
+}
+
+/* Notes — softer, secondary text. */
+.tp-note {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Done items — dimmed with a strikethrough (toggleable via body class). */
+.tp-done {
+  color: var(--text-faint);
+  text-decoration: line-through;
+  text-decoration-color: var(--text-faint);
+}
+
+body.taskpaper-no-strike .tp-done {
+  text-decoration: none;
+  color: var(--text-muted);
+}
+
+/* Tags. */
+.tp-tag {
+  color: var(--text-accent);
+}
+
+.tp-tag-today {
+  color: var(--color-green);
+  font-weight: 600;
+}
+
+.tp-tag-due {
+  color: var(--text-accent);
+}
+
+.tp-tag-overdue {
+  color: var(--text-error);
+  font-weight: 700;
+}
+
+.tp-tag-done {
+  color: var(--text-faint);
+}
+
+/* Filter: dim mode (when "hide non-matching" is off). */
+.tp-dim {
+  opacity: 0.3;
+}
+
+.tp-query-input {
+  margin: var(--size-4-2) 0;
+  padding: var(--size-4-1) var(--size-4-2);
+}
+
+/* ---- Sidebar panel ---- */
+.taskpaper-sidebar {
+  padding: var(--size-4-2);
+}
+
+.taskpaper-sidebar .tp-sb-toolbar {
+  margin-bottom: var(--size-4-2);
+}
+
+.taskpaper-sidebar .tp-sb-clear {
+  width: 100%;
+}
+
+.taskpaper-sidebar .tp-sb-section {
+  margin-bottom: var(--size-4-4);
+}
+
+.taskpaper-sidebar .tp-sb-heading {
+  font-size: var(--font-ui-smaller);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  margin-bottom: var(--size-4-1);
+  padding-left: 4px;
+}
+
+.taskpaper-sidebar .tp-sb-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+}
+
+.taskpaper-sidebar .tp-sb-item:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.taskpaper-sidebar .tp-sb-project {
+  font-weight: 600;
+}
+
+.taskpaper-sidebar .tp-sb-project.is-focused {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.taskpaper-sidebar .tp-sb-project.is-focused .tp-sb-count {
+  background: var(--text-on-accent);
+  color: var(--interactive-accent);
+}
+
+.taskpaper-sidebar .tp-sb-clear:disabled {
+  opacity: 0.4;
+}
+
+.taskpaper-sidebar .tp-sb-tag-name {
+  color: var(--text-accent);
+}
+
+.taskpaper-sidebar .tp-sb-tag-count {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.taskpaper-sidebar .tp-sb-empty {
+  color: var(--text-faint);
+  font-size: var(--font-ui-small);
+  padding: 4px 8px;
+}
+
+.taskpaper-sidebar .tp-sb-search-name {
+  color: var(--text-normal);
+}
+
+.taskpaper-sidebar .tp-sb-count {
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: var(--font-ui-smaller);
+  min-width: 18px;
+  text-align: center;
+}
+
+.tp-field-label {
+  display: block;
+  margin: var(--size-4-2) 0 var(--size-4-1);
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}

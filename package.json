@@ -1,0 +1,24 @@
+{
+  "name": "taskpaper-monorepo",
+  "version": "0.1.0",
+  "description": "TaskPaper for editors — a shared core with VSCode and Obsidian front-ends.",
+  "private": true,
+  "license": "MIT",
+  "workspaces": [
+    "packages/core",
+    "packages/vscode",
+    "packages/obsidian"
+  ],
+  "overrides": {
+    "@codemirror/state": "6.7.1",
+    "@codemirror/view": "6.38.6",
+    "@codemirror/language": "6.12.4",
+    "@codemirror/commands": "6.10.4"
+  },
+  "scripts": {
+    "build": "npm run build --workspace=packages/vscode && npm run build --workspace=packages/obsidian",
+    "compile": "npm run compile --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "package:vscode": "npm run package --workspace=packages/vscode"
+  }
+}
