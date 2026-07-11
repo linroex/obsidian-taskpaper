@@ -7,7 +7,7 @@
  */
 import { EditorState } from '@codemirror/state';
 import { filterExtension, filterDecoField, setFilterEffect } from '../src/editor/filter';
-import { sidebarSignature } from '../src/sidebarLogic';
+import { parseTagList, settingsSignature, sidebarSignature, visibleTagCounts } from '../src/sidebarLogic';
 
 let pass = 0;
 let fail = 0;
@@ -82,10 +82,53 @@ function setEq(a: Set<number>, b: Set<number>): boolean {
 }
 
 // --- render-guard signature (two-click fix) ---
-check('signature stable for same inputs', sidebarSignature('a.taskpaper', 100, 3) === sidebarSignature('a.taskpaper', 100, 3));
-check('signature changes when focus changes', sidebarSignature('a.taskpaper', 100, 3) !== sidebarSignature('a.taskpaper', 100, null));
-check('signature changes when doc length changes', sidebarSignature('a.taskpaper', 100, 3) !== sidebarSignature('a.taskpaper', 101, 3));
-check('signature changes when file changes', sidebarSignature('a.taskpaper', 100, 3) !== sidebarSignature('b.taskpaper', 100, 3));
+const SK = settingsSignature({
+  globalSearches: [{ name: 'Today', query: '@today' }],
+  includeTags: '',
+  excludeTags: 'search',
+});
+check('signature stable for same inputs', sidebarSignature('a.taskpaper', 100, 3, SK) === sidebarSignature('a.taskpaper', 100, 3, SK));
+check('signature changes when focus changes', sidebarSignature('a.taskpaper', 100, 3, SK) !== sidebarSignature('a.taskpaper', 100, null, SK));
+check('signature changes when doc length changes', sidebarSignature('a.taskpaper', 100, 3, SK) !== sidebarSignature('a.taskpaper', 101, 3, SK));
+check('signature changes when file changes', sidebarSignature('a.taskpaper', 100, 3, SK) !== sidebarSignature('b.taskpaper', 100, 3, SK));
+
+// --- render-guard signature: settings component ---
+{
+  const other = settingsSignature({
+    globalSearches: [{ name: 'Today', query: '@today union @due' }],
+    includeTags: '',
+    excludeTags: 'search',
+  });
+  check('signature changes when settings change', sidebarSignature('a.taskpaper', 100, 3, SK) !== sidebarSignature('a.taskpaper', 100, 3, other));
+  check('settingsSignature stable for equal settings', SK === settingsSignature({ globalSearches: [{ name: 'Today', query: '@today' }], includeTags: '', excludeTags: 'search' }));
+  check('settingsSignature changes with includeTags', SK !== settingsSignature({ globalSearches: [{ name: 'Today', query: '@today' }], includeTags: 'due', excludeTags: 'search' }));
+  check('settingsSignature changes with excludeTags', SK !== settingsSignature({ globalSearches: [{ name: 'Today', query: '@today' }], includeTags: '', excludeTags: '' }));
+  check('empty view signature ignores settings', sidebarSignature(null, 0, null, SK) === sidebarSignature(null, 0, null, other));
+}
+
+// --- tag list parsing (settings -> clean names) ---
+{
+  const eq = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
+  check('parseTagList splits spaces and commas, strips @', eq(parseTagList('@due @start, today'), ['due', 'start', 'today']));
+  check('parseTagList handles empty string', parseTagList('').length === 0);
+  check('parseTagList handles blank-ish input', parseTagList(' , ,, ').length === 0);
+  check('parseTagList de-duplicates', eq(parseTagList('@done done, @done'), ['done']));
+}
+
+// --- tag include/exclude merging ---
+{
+  const found = new Map([['done', 5], ['today', 2], ['search', 1]]);
+  const shown = visibleTagCounts(found, [], ['search']);
+  check('excluded tags never shown', !shown.some(([n]) => n === 'search'));
+  check('other found tags kept', shown.length === 2 && shown[0][0] === 'done' && shown[0][1] === 5);
+
+  const withInclude = visibleTagCounts(found, ['due', 'today'], ['search']);
+  const due = withInclude.find(([n]) => n === 'due');
+  check('included tag shown with count 0', due !== undefined && due[1] === 0);
+  check('included tag found in doc keeps its count', withInclude.find(([n]) => n === 'today')?.[1] === 2);
+  check('exclude wins over include', visibleTagCounts(found, ['search'], ['search']).length === 2);
+  check('sorted by count desc then name', withInclude.map(([n]) => n).join(',') === 'done,today,due');
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

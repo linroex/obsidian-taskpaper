@@ -145,6 +145,8 @@ export default class TaskPaperPlugin extends Plugin {
 
   async loadSettings(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    // Deep-copy the array so edits never mutate the shared DEFAULT_SETTINGS.
+    this.settings.globalSearches = this.settings.globalSearches.map((s) => ({ ...s }));
   }
 
   async saveSettings(): Promise<void> {
