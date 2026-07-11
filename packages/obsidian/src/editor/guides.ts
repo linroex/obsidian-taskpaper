@@ -55,10 +55,18 @@ function buildGuides(view: EditorView): DecorationSet {
   const state = view.state;
   const depths = guideDepths(outlineOf(state), state.doc.lines);
   const builder = new RangeSetBuilder<Decoration>();
-  for (let ln = 0; ln < depths.length; ln++) {
-    if (depths[ln] > 0) {
-      const from = state.doc.line(ln + 1).from;
-      builder.add(from, from, lineDeco(depths[ln]));
+  // Depth computation is cheap (linear sweep); only the DECORATIONS are
+  // limited to the viewport, keeping per-keystroke cost constant.
+  const ranges = view.visibleRanges.length > 0 ? view.visibleRanges : [{ from: 0, to: state.doc.length }];
+  let last = -1;
+  for (const { from, to } of ranges) {
+    const first = Math.max(state.doc.lineAt(from).number - 1, last + 1);
+    const end = state.doc.lineAt(to).number - 1;
+    for (let ln = first; ln <= end; ln++) {
+      if (depths[ln] > 0) {
+        builder.add(state.doc.line(ln + 1).from, state.doc.line(ln + 1).from, lineDeco(depths[ln]));
+      }
+      last = ln;
     }
   }
   return builder.finish();

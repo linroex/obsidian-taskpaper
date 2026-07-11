@@ -11,7 +11,7 @@ import { foldEffect, unfoldEffect } from '@codemirror/language';
 import { buildOutline, focusVisibleLines, Outline } from '@taskpaper/core';
 import { setFilterEffect } from './filter';
 import { foldedRangeAtLine, subtreeFoldRange } from './folding';
-import { outlineOf } from './outline';
+import { outlineOf, visibleItems } from './outline';
 
 // ---------------------------------------------------------------------------
 // Pure logic (testable)
@@ -112,7 +112,14 @@ class HandleWidget extends WidgetType {
 function buildHandleDecorations(view: EditorView): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   const outline = outlineOf(view.state);
-  for (const lineNo of handleLines(outline)) {
+  // Viewport-only, like the highlight plugin — full-doc rebuilds are too
+  // costly per keystroke on huge files.
+  const parents = new Set(handleLines(outline));
+  for (const item of visibleItems(view, outline)) {
+    if (!parents.has(item.line)) {
+      continue;
+    }
+    const lineNo = item.line;
     const line = view.state.doc.line(lineNo + 1);
     const indent = /^[\t ]*/.exec(line.text)?.[0].length ?? 0;
     builder.add(

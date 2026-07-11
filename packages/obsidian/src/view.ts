@@ -334,7 +334,9 @@ export class TaskPaperView extends TextFileView {
         if (update.docChanged && !this.applyingExternalData) {
           this.data = update.state.doc.toString();
           this.requestSave();
-          this.plugin.refreshSidebar();
+          // Debounced: a full sidebar rebuild per keystroke is too costly
+          // on very large documents.
+          this.plugin.refreshSidebarSoon();
         }
         // Any filter change (sidebar, tag click, commands, Escape) syncs the bar.
         if (update.transactions.some((tr) => tr.effects.some((e) => e.is(setFilterEffect)))) {

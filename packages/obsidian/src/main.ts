@@ -12,6 +12,7 @@ export default class TaskPaperPlugin extends Plugin {
   /** The most recently active TaskPaper editor (drives the sidebar). */
   lastActiveView: TaskPaperView | null = null;
   private statusEl: HTMLElement | null = null;
+  private refreshTimer: number | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -63,6 +64,18 @@ export default class TaskPaperPlugin extends Plugin {
       }
     }
     this.updateStatusBar();
+  }
+
+  /** Debounced refresh for high-frequency sources (typing). On a 10k+ line
+   *  document a full sidebar DOM rebuild per keystroke is the bottleneck. */
+  refreshSidebarSoon(): void {
+    if (this.refreshTimer !== null) {
+      window.clearTimeout(this.refreshTimer);
+    }
+    this.refreshTimer = window.setTimeout(() => {
+      this.refreshTimer = null;
+      this.refreshSidebar();
+    }, 250);
   }
 
   updateStatusBar(): void {
