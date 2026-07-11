@@ -133,7 +133,11 @@ export default class TaskPaperPlugin extends Plugin {
 
     cmd('toggle-done', 'Toggle done', (v) => this.commands.toggleDone(v));
     cmd('toggle-today', 'Toggle today', (v) => this.commands.toggleToday(v));
-    cmd('toggle-tag', 'Toggle tag…', (v) => this.commands.toggleTag(v));
+    cmd('toggle-tag', 'Tag with…', (v) => this.commands.toggleTag(v));
+    cmd('copy-displayed', 'Copy displayed', (v) => this.commands.copyDisplayed(v));
+    cmd('select-branch', 'Select branch', (v) => this.commands.selectBranch(v));
+    cmd('expand-selection', 'Expand selection', (v) => this.commands.expandSelection(v));
+    cmd('contract-selection', 'Contract selection', (v) => this.commands.contractSelection(v));
     cmd('new-task', 'New task', (v) => this.commands.newTask(v));
     cmd('new-project', 'New project', (v) => this.commands.newProject(v));
     cmd('new-note', 'New note', (v) => this.commands.newNote(v));
@@ -166,6 +170,9 @@ export default class TaskPaperPlugin extends Plugin {
     cmd('expand-items-completely', 'Expand items completely', (v) =>
       this.commands.expandItemsCompletely(v),
     );
+    cmd('collapse-items-completely', 'Collapse items completely', (v) =>
+      this.commands.collapseItemsCompletely(v),
+    );
     cmd('collapse-all-by-level', 'Collapse all by level', (v) =>
       this.commands.collapseAllByLevel(v),
     );
@@ -175,6 +182,10 @@ export default class TaskPaperPlugin extends Plugin {
     cmd('move-down', 'Move item down', (v) => this.commands.moveDown(v));
     cmd('indent', 'Indent item', (v) => this.commands.indent(v));
     cmd('outdent', 'Outdent item', (v) => this.commands.outdent(v));
+    cmd('move-item-only-up', 'Move item only up', (v) => this.commands.moveOnlyUp(v));
+    cmd('move-item-only-down', 'Move item only down', (v) => this.commands.moveOnlyDown(v));
+    cmd('move-item-only-right', 'Move item only right', (v) => this.commands.indentOnly(v));
+    cmd('move-item-only-left', 'Move item only left', (v) => this.commands.outdentOnly(v));
 
     this.addCommand({
       id: 'open-sidebar',

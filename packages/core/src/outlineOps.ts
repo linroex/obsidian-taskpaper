@@ -56,6 +56,82 @@ export function moveItemDown(lines: string[], line: number, tabSize: number): Ou
   return { lines: out, cursorLine: nextEndAfter + 1 + (line - item.line) };
 }
 
+// ---------------------------------------------------------------------------
+// Single-item moves (original TaskPaper 3 distinguishes 'Move' from 'Move
+// Branch'): only the item's OWN line relocates among its siblings' lines —
+// its former subtree stays exactly where it is, re-parenting to whatever
+// item now precedes it at a shallower indent.
+// ---------------------------------------------------------------------------
+
+/** Move ONLY the item's line above its previous sibling's line; children stay put. */
+export function moveItemOnlyUp(lines: string[], line: number, tabSize: number): OutlineEdit | null {
+  const { item, roots } = itemAt(lines, line, tabSize);
+  if (!item) {
+    return null;
+  }
+  const siblings = siblingsOf(item, roots);
+  const idx = siblings.indexOf(item);
+  if (idx <= 0) {
+    return null;
+  }
+  const prev = siblings[idx - 1];
+  const out = lines.slice();
+  out.splice(item.line, 1);
+  out.splice(prev.line, 0, lines[item.line]);
+  return { lines: out, cursorLine: prev.line };
+}
+
+/** Move ONLY the item's line below its next sibling's branch; children stay put. */
+export function moveItemOnlyDown(lines: string[], line: number, tabSize: number): OutlineEdit | null {
+  const { item, roots } = itemAt(lines, line, tabSize);
+  if (!item) {
+    return null;
+  }
+  const siblings = siblingsOf(item, roots);
+  const idx = siblings.indexOf(item);
+  if (idx < 0 || idx >= siblings.length - 1) {
+    return null;
+  }
+  const nextSib = siblings[idx + 1];
+  const out = lines.slice();
+  out.splice(item.line, 1);
+  // Removing the single item line shifts the next sibling's subtree up by one,
+  // so inserting AT the original subtreeEnd index lands just after it.
+  out.splice(nextSib.subtreeEnd, 0, lines[item.line]);
+  return { lines: out, cursorLine: nextSib.subtreeEnd };
+}
+
+/** Indent ONLY the item's line one level (prepend a tab); children stay put. */
+export function indentItemOnly(lines: string[], line: number, tabSize: number): OutlineEdit | null {
+  const { item } = itemAt(lines, line, tabSize);
+  if (!item) {
+    return null;
+  }
+  const out = lines.slice();
+  out[item.line] = '\t' + out[item.line];
+  return { lines: out, cursorLine: line };
+}
+
+/** Outdent ONLY the item's line one level (remove one tab, or up to tabSize spaces). */
+export function outdentItemOnly(lines: string[], line: number, tabSize: number): OutlineEdit | null {
+  const { item } = itemAt(lines, line, tabSize);
+  if (!item) {
+    return null;
+  }
+  const text = lines[item.line];
+  if (!text.startsWith('\t') && !text.startsWith(' ')) {
+    return null; // already at the left margin
+  }
+  const out = lines.slice();
+  if (text.startsWith('\t')) {
+    out[item.line] = text.slice(1);
+  } else {
+    const spaces = /^ */.exec(text)?.[0].length ?? 0;
+    out[item.line] = text.slice(Math.min(spaces, tabSize));
+  }
+  return { lines: out, cursorLine: line };
+}
+
 /** Indent an item and its subtree one level (prepend a tab). */
 export function indentItem(lines: string[], line: number, tabSize: number): OutlineEdit | null {
   const { item } = itemAt(lines, line, tabSize);

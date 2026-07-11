@@ -2,6 +2,7 @@ export * from './model';
 export * from './tags';
 export * from './dates';
 export * from './outlineOps';
+export * from './selection';
 export * from './analysis';
 export * from './archive';
 export * from './focus';

@@ -19,6 +19,7 @@ import { backspaceUnindentDeletion, escapeClearsFilter } from '../src/editor/key
 import { handleLines, planHandleDrag } from '../src/editor/handles';
 import { guideDepths, leadingTabs } from '../src/editor/guides';
 import {
+  linesToCollapseCompletely,
   linesToCollapseDeepestLevel,
   linesToExpandShallowestLevel,
 } from '../src/editor/folding';
@@ -767,6 +768,26 @@ check('an only child cannot move', planHandleDrag(DRAG_DOC, 4, 0, 4) === null);
     'expand with nothing folded is a no-op',
     linesToExpandShallowestLevel(items, none).length === 0,
   );
+}
+
+// --- collapse items completely (item + every foldable descendant) ---
+{
+  // A(0) > a1(1) > x(2) > y(3), a2(1); B(0) > b1(1). Foldable: A, a1, x, B.
+  const items = buildOutline(
+    ['A:', '\t- a1', '\t\t- x', '\t\t\t- y', '\t- a2', 'B:', '\t- b1'],
+    4,
+  ).items;
+  check(
+    'collapse completely folds the item and all foldable descendants',
+    linesToCollapseCompletely(items, 0).join(',') === '0,1,2',
+    linesToCollapseCompletely(items, 0).join(','),
+  );
+  check(
+    'collapse completely on a mid item covers only its branch',
+    linesToCollapseCompletely(items, 1).join(',') === '1,2',
+  );
+  check('collapse completely on a leaf is a no-op', linesToCollapseCompletely(items, 4).length === 0);
+  check('collapse completely on a blank line is a no-op', linesToCollapseCompletely(items, 99).length === 0);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
