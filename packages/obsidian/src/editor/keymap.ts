@@ -36,4 +36,53 @@ const continueTask: KeyBinding = {
   },
 };
 
-export const taskpaperKeymap: KeyBinding[] = [continueTask];
+/**
+ * If Backspace at column `col` should un-indent instead of deleting a
+ * character, return the range of indentation to remove (offsets within the
+ * line); otherwise null. It triggers when only indentation — or indentation
+ * plus the `- ` task marker — lies before the cursor. (Pure; testable.)
+ */
+export function backspaceUnindentDeletion(
+  lineText: string,
+  col: number,
+  tabSize: number,
+): { from: number; to: number } | null {
+  const before = lineText.slice(0, col);
+  if (!/^[\t ]*(?:-[ \t]*)?$/.test(before)) {
+    return null;
+  }
+  const indent = /^[\t ]*/.exec(before)?.[0] ?? '';
+  if (indent.length === 0) {
+    return null; // already at the left margin — let Backspace join lines
+  }
+  // Remove one level: a single tab, or up to tabSize trailing spaces.
+  if (indent.endsWith('\t')) {
+    return { from: indent.length - 1, to: indent.length };
+  }
+  const spaces = /[ ]*$/.exec(indent)?.[0].length ?? 0;
+  return { from: indent.length - Math.min(spaces, tabSize), to: indent.length };
+}
+
+/** Backspace at the start of an item's text removes one indent level. */
+const backspaceUnindent: KeyBinding = {
+  key: 'Backspace',
+  run(view: EditorView): boolean {
+    const { state } = view;
+    const sel = state.selection.main;
+    if (!sel.empty) {
+      return false;
+    }
+    const line = state.doc.lineAt(sel.head);
+    const del = backspaceUnindentDeletion(line.text, sel.head - line.from, 4);
+    if (!del) {
+      return false;
+    }
+    view.dispatch({
+      changes: { from: line.from + del.from, to: line.from + del.to },
+      scrollIntoView: true,
+    });
+    return true;
+  },
+};
+
+export const taskpaperKeymap: KeyBinding[] = [continueTask, backspaceUnindent];

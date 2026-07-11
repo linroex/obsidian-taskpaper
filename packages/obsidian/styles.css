@@ -60,9 +60,15 @@ body.taskpaper-no-strike .tp-done {
   color: var(--text-muted);
 }
 
-/* Tags. */
+/* Tags — clickable: click filters by the tag, clicking it again clears. */
 .tp-tag {
   color: var(--text-accent);
+  cursor: pointer;
+}
+
+.tp-tag:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--text-accent);
 }
 
 .tp-tag-today {
@@ -91,6 +97,131 @@ body.taskpaper-no-strike .tp-done {
 .tp-query-input {
   margin: var(--size-4-2) 0;
   padding: var(--size-4-1) var(--size-4-2);
+}
+
+/* ---- Links (http, www, email, file paths) ---- */
+.tp-link {
+  color: var(--link-external-color, var(--text-accent));
+  text-decoration: underline;
+  text-decoration-color: var(--link-external-color, var(--text-accent));
+  cursor: pointer;
+}
+
+.tp-link:hover {
+  color: var(--link-external-color-hover, var(--text-accent-hover));
+}
+
+/* ---- Item handles (dot before items with children; hover-revealed) ---- */
+.tp-handle {
+  display: inline-block;
+  width: 1em;
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 120ms ease-in-out;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.tp-handle::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.taskpaper-view .cm-line:hover .tp-handle {
+  opacity: 1;
+}
+
+.tp-handle:hover::before {
+  background: var(--text-muted);
+}
+
+.tp-handle:active {
+  cursor: grabbing;
+}
+
+/* Drop indicator while dragging a branch by its handle. */
+.tp-drop-indicator {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--interactive-accent);
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* ---- Find/replace panel (CodeMirror search), themed for Obsidian ---- */
+.taskpaper-view .cm-panels {
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+  border-color: var(--background-modifier-border);
+}
+
+.taskpaper-view .cm-panels-top {
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.taskpaper-view .cm-panel.cm-search {
+  padding: var(--size-4-2);
+  font-size: var(--font-ui-small);
+}
+
+.taskpaper-view .cm-panel.cm-search label {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.taskpaper-view .cm-panel.cm-search [name='close'] {
+  color: var(--text-muted);
+}
+
+.taskpaper-view .cm-textfield {
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+}
+
+.taskpaper-view .cm-button {
+  background-color: var(--interactive-normal);
+  background-image: none;
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+
+.taskpaper-view .cm-button:hover {
+  background-color: var(--interactive-hover);
+}
+
+.taskpaper-view .cm-searchMatch {
+  background-color: var(--text-highlight-bg);
+}
+
+.taskpaper-view .cm-searchMatch.cm-searchMatch-selected {
+  outline: 1px solid var(--interactive-accent);
+}
+
+.taskpaper-view .cm-selectionMatch {
+  background-color: var(--text-highlight-bg);
+}
+
+/* ---- Tag autocomplete popup ---- */
+.cm-tooltip.cm-tooltip-autocomplete {
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+}
+
+.cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
 }
 
 /* ---- Sidebar panel ---- */
