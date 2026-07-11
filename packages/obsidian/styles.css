@@ -472,6 +472,35 @@ body.taskpaper-no-strike .tp-done {
   text-align: center;
 }
 
+/* ---- sidebar drag & drop ---- */
+
+/* A hoisted project (Alt+click / context menu): its row shows dimmed —
+ * the project line itself is hidden in the editor, only contents show. */
+.taskpaper-sidebar .tp-sb-project.is-hoisted {
+  font-style: italic;
+}
+
+/* The row being dragged to reorder. */
+.taskpaper-sidebar .tp-sb-project.tp-sb-dragging {
+  opacity: 0.5;
+}
+
+/* Drop indicator between rows while reordering projects. */
+.taskpaper-sidebar .tp-sb-project.tp-sb-drop-before {
+  box-shadow: inset 0 2px 0 0 var(--interactive-accent);
+}
+
+.taskpaper-sidebar .tp-sb-project.tp-sb-drop-after {
+  box-shadow: inset 0 -2px 0 0 var(--interactive-accent);
+}
+
+/* The project row hovered while dragging an editor item by its handle —
+ * dropping moves the branch into this project. */
+.taskpaper-sidebar .tp-sb-project.tp-sb-drop-into {
+  background-color: var(--background-modifier-hover);
+  box-shadow: inset 0 0 0 2px var(--interactive-accent);
+}
+
 .tp-field-label {
   display: block;
   margin: var(--size-4-2) 0 var(--size-4-1);

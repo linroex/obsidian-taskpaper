@@ -22,6 +22,27 @@ export function focusVisibleLines(outline: Outline, line: number): Set<number> {
 }
 
 /**
+ * The set of lines visible when a project is HOISTED (original TaskPaper 3:
+ * double-clicking a sidebar project hides the project line itself and shows
+ * only its contents): the target's DESCENDANT lines plus its ANCESTOR lines
+ * for context — but NOT the target's own line.
+ */
+export function hoistVisibleLines(outline: Outline, line: number): Set<number> {
+  const set = new Set<number>();
+  const target = targetAt(outline, line);
+  if (!target) {
+    return set;
+  }
+  for (let ln = target.line + 1; ln <= target.subtreeEnd; ln++) {
+    set.add(ln);
+  }
+  for (let a = target.parent; a; a = a.parent) {
+    set.add(a.line);
+  }
+  return set;
+}
+
+/**
  * Lines of the other projects that should be folded to focus a target project —
  * every project that is neither the target, an ancestor of it, nor a descendant.
  */

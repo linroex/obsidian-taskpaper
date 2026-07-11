@@ -40,6 +40,9 @@ export interface EditorHost {
   openLink(href: string, kind: LinkKind): void;
   /** Persist the current editor content immediately (Cmd-S, blur). */
   saveNow(): void;
+  /** Hit-test hook for handle drags over the sidebar (tests inject one —
+   *  jsdom's document.elementFromPoint always returns null). */
+  elementFromPoint?(x: number, y: number): Element | null;
 }
 
 /**
@@ -66,6 +69,7 @@ export function createEditorExtensions(host: EditorHost): Extension[] {
         host.setFocusedLine(line);
         host.refresh();
       },
+      elementFromPoint: host.elementFromPoint?.bind(host),
     }),
     tagAutocomplete,
     search({ top: true }),

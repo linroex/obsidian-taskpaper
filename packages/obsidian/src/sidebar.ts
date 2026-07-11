@@ -2,6 +2,9 @@ import { ItemView, Menu, WorkspaceLeaf } from 'obsidian';
 import { EditorSelection } from '@codemirror/state';
 import {
   focusVisibleLines,
+  hoistVisibleLines,
+  moveBranchAfter,
+  moveBranchBefore,
   projectStats,
   quoteQueryValue,
   rewriteSearchLine,
@@ -94,7 +97,7 @@ export class TaskPaperSidebarView extends ItemView {
       const matches =
         composed.type === 'none'
           ? spec === null
-          : composed.type === 'focus'
+          : composed.type === 'focus' || composed.type === 'hoist'
             ? spec?.mode === 'focus' && view.focusedLine === composed.line
             : spec?.mode === 'query' && spec.query === composed.query;
       if (!matches) {
@@ -159,6 +162,7 @@ export class TaskPaperSidebarView extends ItemView {
         !multi &&
         selection.length === 0 &&
         item.kind !== 'project' &&
+        item.kind !== 'hoist' &&
         activeQuery === item.query
       ) {
         this.clearFocus(view);
@@ -169,7 +173,10 @@ export class TaskPaperSidebarView extends ItemView {
     };
     const isRowSelected = (item: SidebarSelectionItem): boolean =>
       isSelected(selection, item) ||
-      (selection.length === 0 && item.kind !== 'project' && activeQuery === item.query);
+      (selection.length === 0 &&
+        item.kind !== 'project' &&
+        item.kind !== 'hoist' &&
+        activeQuery === item.query);
     const addSearch = (name: string, query: string, global: boolean): HTMLElement => {
       const el = searchSection.createDiv({
         cls: global ? 'tp-sb-item tp-sb-search tp-sb-search-global' : 'tp-sb-item tp-sb-search',
@@ -204,22 +211,38 @@ export class TaskPaperSidebarView extends ItemView {
       projSection.createDiv({ cls: 'tp-sb-empty', text: '（無專案）' });
     }
     for (const p of projects) {
-      const el = projSection.createDiv({ cls: 'tp-sb-item tp-sb-project' });
+      const el = projSection.createDiv({
+        cls: 'tp-sb-item tp-sb-project',
+        // data-line lets editor handle drags hit-test their drop target;
+        // draggable enables the original sidebar's drag-reorder.
+        attr: { 'data-line': p.line, draggable: 'true' },
+      });
       el.style.paddingLeft = `${8 + p.level * 14}px`;
-      const selItem: SidebarSelectionItem = {
-        kind: 'project',
-        line: p.line,
-        name: cleanProjectName(p.displayText),
-      };
+      const name = cleanProjectName(p.displayText);
+      const selItem: SidebarSelectionItem = { kind: 'project', line: p.line, name };
+      const hoistItem: SidebarSelectionItem = { kind: 'hoist', line: p.line, name };
       if (isSelected(selection, selItem) || view.focusedLine === p.line) {
         el.addClass('is-focused');
+      }
+      if (isSelected(selection, hoistItem)) {
+        el.addClass('is-hoisted');
       }
       el.createSpan({ text: p.displayText || '(未命名)' });
       const remaining = stats.get(p)?.remaining ?? 0;
       if (remaining > 0) {
         el.createSpan({ cls: 'tp-sb-count', text: String(remaining) });
       }
-      el.onclick = (e) => select(selItem, e);
+      // Original: double-click hoists. Our single click already toggles focus,
+      // so hoist rides on Alt/Option+click (and the context menu below).
+      el.onclick = (e) => {
+        if (e.altKey) {
+          this.hoistProject(view, hoistItem);
+        } else {
+          select(selItem, e);
+        }
+      };
+      el.addEventListener('contextmenu', (e) => this.showProjectMenu(e, view, hoistItem));
+      this.registerProjectDrag(el, view, p.line);
     }
 
     // Tags section.
@@ -273,7 +296,7 @@ export class TaskPaperSidebarView extends ItemView {
     if (composed.type === 'none') {
       view.focusedLine = null;
       view.editor.dispatch({ effects: setFilterEffect.of(null) });
-    } else if (composed.type === 'focus') {
+    } else if (composed.type === 'focus' || composed.type === 'hoist') {
       if (composed.line + 1 > view.editor.state.doc.lines) {
         // Stale line (document shrank since selection) — bail out safely.
         view.sidebarSelection = [];
@@ -284,13 +307,22 @@ export class TaskPaperSidebarView extends ItemView {
       }
       const outline = outlineOf(view.editor.state);
       view.focusedLine = composed.line;
+      // A hoisted project's own line is hidden — park the cursor on its
+      // first content line instead.
+      const cursorLine = Math.min(
+        composed.line + (composed.type === 'hoist' ? 2 : 1),
+        view.editor.state.doc.lines,
+      );
       view.editor.dispatch({
         effects: setFilterEffect.of({
           mode: 'focus',
-          visible: focusVisibleLines(outline, composed.line),
+          visible:
+            composed.type === 'hoist'
+              ? hoistVisibleLines(outline, composed.line)
+              : focusVisibleLines(outline, composed.line),
           hide,
         }),
-        selection: EditorSelection.cursor(view.editor.state.doc.line(composed.line + 1).from),
+        selection: EditorSelection.cursor(view.editor.state.doc.line(cursorLine).from),
         scrollIntoView: true,
       });
     } else {
@@ -300,6 +332,120 @@ export class TaskPaperSidebarView extends ItemView {
       });
     }
     this.app.workspace.revealLeaf(view.leaf);
+    this.plugin.refreshSidebar();
+  }
+
+  /** Hoist a project (original: double-click): show only its CONTENTS —
+   *  descendants plus ancestor context, the project line itself hidden.
+   *  Alt+clicking the already hoisted row un-hoists (toggle). */
+  private hoistProject(view: TaskPaperView, item: SidebarSelectionItem): void {
+    view.sidebarSelection = toggleSelection(view.sidebarSelection, item, false);
+    this.applySelection(view);
+  }
+
+  /** Context menu for a project row: Hoist（只顯示內容）. */
+  private showProjectMenu(e: MouseEvent, view: TaskPaperView, item: SidebarSelectionItem): void {
+    e.preventDefault();
+    const menu = new Menu();
+    menu.addItem((mi) =>
+      mi
+        .setTitle('Hoist（只顯示內容）')
+        .setIcon('zoom-in')
+        .onClick(() => this.hoistProject(view, item)),
+    );
+    menu.showAtMouseEvent(e);
+  }
+
+  // ---- sidebar project drag-reorder (original: drag projects to reorder) ----
+
+  /** Line (0-based) of the project row a drag started from, while dragging. */
+  private dragSourceLine: number | null = null;
+
+  /** Whether the pointer sits in the lower half of the row (drop AFTER it). */
+  private static dropsAfter(row: HTMLElement, e: DragEvent): boolean {
+    const rect = row.getBoundingClientRect();
+    return e.clientY > rect.top + rect.height / 2;
+  }
+
+  private clearDropMarks(): void {
+    for (const marked of Array.from(
+      this.contentEl.querySelectorAll('.tp-sb-drop-before, .tp-sb-drop-after'),
+    )) {
+      marked.classList.remove('tp-sb-drop-before', 'tp-sb-drop-after');
+    }
+  }
+
+  /** Wire the HTML5 DnD handlers that let project rows reorder the document. */
+  private registerProjectDrag(el: HTMLElement, view: TaskPaperView, line: number): void {
+    el.addEventListener('dragstart', (e: DragEvent) => {
+      this.dragSourceLine = line;
+      el.addClass('tp-sb-dragging');
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(line));
+      }
+    });
+    el.addEventListener('dragend', () => {
+      this.dragSourceLine = null;
+      el.removeClass('tp-sb-dragging');
+      this.clearDropMarks();
+    });
+    el.addEventListener('dragover', (e: DragEvent) => {
+      if (this.dragSourceLine === null || this.dragSourceLine === line) {
+        return;
+      }
+      e.preventDefault(); // marks the row as a valid drop target
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'move';
+      }
+      this.clearDropMarks();
+      el.addClass(
+        TaskPaperSidebarView.dropsAfter(el, e) ? 'tp-sb-drop-after' : 'tp-sb-drop-before',
+      );
+    });
+    el.addEventListener('dragleave', () => {
+      el.removeClass('tp-sb-drop-before', 'tp-sb-drop-after');
+    });
+    el.addEventListener('drop', (e: DragEvent) => {
+      e.preventDefault();
+      this.clearDropMarks();
+      const source = this.dragSourceLine;
+      this.dragSourceLine = null;
+      if (source === null || source === line) {
+        return;
+      }
+      this.dropProject(view, source, line, TaskPaperSidebarView.dropsAfter(el, e));
+    });
+  }
+
+  /** Move the dragged project's whole subtree before/after the target project. */
+  private dropProject(
+    view: TaskPaperView,
+    sourceLine: number,
+    targetLine: number,
+    after: boolean,
+  ): void {
+    const doc = view.editor.state.doc;
+    const lines: string[] = [];
+    for (let i = 1; i <= doc.lines; i++) {
+      lines.push(doc.line(i).text);
+    }
+    const edit = after
+      ? moveBranchAfter(lines, sourceLine, targetLine, 4)
+      : moveBranchBefore(lines, sourceLine, targetLine, 4);
+    if (!edit) {
+      return;
+    }
+    const br = view.editor.state.lineBreak;
+    let anchor = 0;
+    for (let i = 0; i < edit.cursorLine; i++) {
+      anchor += edit.lines[i].length + br.length;
+    }
+    view.editor.dispatch({
+      changes: { from: 0, to: doc.length, insert: edit.lines.join(br) },
+      selection: EditorSelection.cursor(anchor),
+      scrollIntoView: true,
+    });
     this.plugin.refreshSidebar();
   }
 

@@ -35,7 +35,8 @@ function applyInfo(el: HTMLElement, info?: DomElementInfo | string): void {
     return;
   }
   if (info.cls) {
-    el.classList.add(...(Array.isArray(info.cls) ? info.cls : [info.cls]));
+    const classes = Array.isArray(info.cls) ? info.cls : info.cls.split(/\s+/);
+    el.classList.add(...classes.filter((c) => c.length > 0));
   }
   if (info.text !== undefined) {
     el.textContent = info.text;
@@ -115,6 +116,17 @@ export function installDomHelpers(win: { HTMLElement: typeof HTMLElement }): voi
   };
   proto.detach = function (this: HTMLElement): void {
     this.remove();
+  };
+  proto.setAttr = function (
+    this: HTMLElement,
+    name: string,
+    value: string | number | boolean | null,
+  ): void {
+    if (value === null) {
+      this.removeAttribute(name);
+    } else {
+      this.setAttribute(name, String(value));
+    }
   };
 }
 
@@ -296,8 +308,15 @@ export class MenuItem {
 }
 
 export class Menu {
+  /** Every Menu ever constructed — lets tests reach menus plugin code
+   *  creates internally (e.g. context menus). */
+  static created: Menu[] = [];
   items: MenuItem[] = [];
   shownAt: MouseEvent | null = null;
+
+  constructor() {
+    Menu.created.push(this);
+  }
 
   addItem(cb: (item: MenuItem) => void): this {
     const item = new MenuItem();

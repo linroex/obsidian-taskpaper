@@ -10,7 +10,7 @@
 import { EditorState } from '@codemirror/state';
 import { CompletionContext } from '@codemirror/autocomplete';
 import { buildOutline, runQuery } from '@taskpaper/core';
-import { filterExtension, filterDecoField, setFilterEffect } from '../src/editor/filter';
+import { filterExtension, filterDecoField, searchbarText, setFilterEffect } from '../src/editor/filter';
 import { toggledTagFilter } from '../src/editor/tagClick';
 import { findLinks, linkHref } from '../src/editor/links';
 import { collectTagNames, tagCompletionSource } from '../src/editor/tagComplete';
@@ -248,6 +248,46 @@ check('signature changes when file changes', sidebarSignature('a.taskpaper', 100
     'validateSelection drops renamed projects',
     eqJson(validateSelection([proj(3, 'Work')], nameAt), []),
   );
+
+  // --- hoist (Alt+click a sidebar project): a distinct selection kind ---
+  const hoist = (line: number, name: string) => ({ kind: 'hoist' as const, line, name });
+  const hoisted = composeSelection([hoist(4, 'Work')]);
+  check('single hoist composes to hoist mode', hoisted.type === 'hoist' && hoisted.line === 4);
+  check(
+    'alt-clicking the hoisted project again clears (toggle)',
+    toggleSelection([hoist(4, 'W')], hoist(4, 'W'), false).length === 0,
+  );
+  check(
+    'hoist and focus of the same project are distinct selections',
+    eqJson(toggleSelection([proj(4, 'W')], hoist(4, 'W'), false), [hoist(4, 'W')]),
+  );
+  const hoistMixed = composeSelection([hoist(0, 'Work'), tag('@today')]);
+  check(
+    'hoist in a multi-selection scopes like a project (descendants intersect)',
+    hoistMixed.type === 'query' &&
+      hoistMixed.query === '(((@id = 0 and project)//*)) intersect ((@today))',
+    JSON.stringify(hoistMixed),
+  );
+  check(
+    'validateSelection drops shifted hoist lines',
+    eqJson(validateSelection([hoist(1, 'Work')], nameAt), []),
+  );
+  check(
+    'validateSelection keeps resolving hoists',
+    validateSelection([hoist(0, 'Work')], nameAt).length === 1,
+  );
+}
+
+// --- searchbar text for hoisted focus ---
+{
+  const focusSpec = { mode: 'focus' as const, visible: new Set([1, 2]), hide: true };
+  check('searchbar shows project "Name" for focus', searchbarText(focusSpec, 'Work') === 'project "Work"');
+  check(
+    'searchbar shows project "Name"//* when hoisted',
+    searchbarText(focusSpec, 'Work', true) === 'project "Work"//*',
+    String(searchbarText(focusSpec, 'Work', true)),
+  );
+  check('searchbar empty when the project name is unknown', searchbarText(focusSpec, null, true) === '');
 }
 
 // --- tag click: toggling the filter ---
