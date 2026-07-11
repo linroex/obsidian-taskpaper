@@ -58,7 +58,8 @@ export function collectTagValueCompletions(outline: Outline, name: string): Comp
 function tagValueCompletion(context: CompletionContext): CompletionResult | null {
   const line = context.state.doc.lineAt(context.pos);
   const before = line.text.slice(0, context.pos - line.from);
-  const open = /(?:^|\s)@([A-Za-z0-9._-]+)\(([^()]*)$/.exec(before);
+  // Value segment allows escaped parens, same as TAG_RE (`@note(a\\)b`).
+  const open = /(?:^|\s)@([A-Za-z0-9._-]+)\(((?:\\.|[^()\\])*)$/.exec(before);
   if (!open) {
     return null;
   }
@@ -72,7 +73,7 @@ function tagValueCompletion(context: CompletionContext): CompletionResult | null
   return {
     from: context.pos - typed.length,
     options,
-    validFor: /^[^(),]*$/,
+    validFor: /^(?:\\.|[^(),\\])*$/,
   };
 }
 

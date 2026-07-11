@@ -251,6 +251,25 @@ check('signature changes when file changes', sidebarSignature('a.taskpaper', 100
   );
 }
 
+// --- palette + value-completion regression (codex review findings) ---
+{
+  // Escaped parens — in an earlier tag on the line AND in the value being
+  // typed — must not disable value completion.
+  const doc = '- y @note(v1)\n- x @memo(a\\)b) @note(a\\)';
+  const state = EditorState.create({ doc });
+  const result = tagCompletionSource(new CompletionContext(state, doc.length, false));
+  check(
+    'value completion survives escaped parens',
+    result !== null && result.options.some((o) => o.label === 'v1'),
+    JSON.stringify(result?.options?.map((o) => o.label)),
+  );
+
+  // A project entry re-resolves by name when lines shift.
+  const entries = goToAnythingEntries(buildOutline(['A:', 'B:'], 4), []);
+  const b = entries.find((e) => e.kind === 'project' && e.name === 'B');
+  check('project entries carry their name for re-resolution', b !== undefined && b.kind === 'project' && b.name === 'B');
+}
+
 // --- tag click: toggling the filter ---
 {
   const set = toggledTagFilter(null, 'today', true);

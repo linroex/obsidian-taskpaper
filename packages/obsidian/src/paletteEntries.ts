@@ -9,11 +9,12 @@ import { EditorSelection } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { Outline, quoteQueryValue, savedSearches, tagNamesToValues } from '@taskpaper/core';
 import { setFilterEffect } from './editor/filter';
+import { outlineOf } from './editor/outline';
 import type { GlobalSearch } from './sidebarLogic';
 
 /** One row of a palette: jump to a project line, or apply a query filter. */
 export type PaletteEntry =
-  | { kind: 'project'; text: string; line: number }
+  | { kind: 'project'; text: string; line: number; name: string }
   | { kind: 'search'; text: string; query: string }
   | { kind: 'tag'; text: string; query: string };
 
@@ -21,7 +22,12 @@ export type PaletteEntry =
 export function projectEntries(outline: Outline, prefix = ''): PaletteEntry[] {
   return outline.items
     .filter((i) => i.kind === 'project')
-    .map((p) => ({ kind: 'project' as const, text: `${prefix}${p.displayText}`, line: p.line }));
+    .map((p) => ({
+      kind: 'project' as const,
+      text: `${prefix}${p.displayText}`,
+      line: p.line,
+      name: p.displayText,
+    }));
 }
 
 /** All saved searches: global (settings) first, then the document's @search items. */
@@ -109,11 +115,18 @@ export interface PaletteHost {
  */
 export function applyPaletteEntry(view: EditorView, host: PaletteHost, entry: PaletteEntry): void {
   if (entry.kind === 'project') {
-    if (entry.line + 1 > view.state.doc.lines) {
-      return; // stale line — the document shrank since the palette opened
+    // Re-resolve against the CURRENT outline — edits since the palette opened
+    // can shift lines, and a length check alone would jump somewhere random.
+    const outline = outlineOf(view.state);
+    const target =
+      outline.items.find(
+        (i) => i.line === entry.line && i.kind === 'project' && i.displayText === entry.name,
+      ) ?? outline.items.find((i) => i.kind === 'project' && i.displayText === entry.name);
+    if (!target) {
+      return; // the project no longer exists
     }
     view.dispatch({
-      selection: EditorSelection.cursor(view.state.doc.line(entry.line + 1).from),
+      selection: EditorSelection.cursor(view.state.doc.line(target.line + 1).from),
       scrollIntoView: true,
     });
     view.focus();
