@@ -229,6 +229,11 @@ check(
   setLineKind('Work: @flag', 'task') === '- Work @flag',
   setLineKind('Work: @flag', 'task'),
 );
+check(
+  'task -> project with escaped paren in tag value',
+  setLineKind('- Ship @x(a\\)b)', 'project') === 'Ship: @x(a\\)b)',
+  setLineKind('- Ship @x(a\\)b)', 'project'),
+);
 check('format is idempotent (task)', setLineKind('- x', 'task') === '- x');
 check('format is idempotent (project)', setLineKind('X:', 'project') === 'X:');
 check('format blank untouched', setLineKind('   ', 'task') === '   ');
@@ -295,6 +300,14 @@ check(
   'move a nested item up to its ancestor project re-indents as direct child',
   mvDeep !== null && mvDeep.lines.join('|') === 'One:|\t- a|\t- a-child|Two:|\t- b',
   JSON.stringify(mvDeep?.lines),
+);
+// Space-indented target: new indentation follows the project's ACTUAL leading
+// whitespace (4 spaces here), not tabs derived from its structural level.
+const mvSpaces = moveBranchToProject(['Root:', '    Sub:', '- x'], 2, 1, 4);
+check(
+  'move into a space-indented project uses its actual whitespace',
+  mvSpaces !== null && mvSpaces.lines.join('|') === 'Root:|    Sub:|    \t- x',
+  JSON.stringify(mvSpaces?.lines),
 );
 check('move into own subtree returns null', moveBranchToProject(['One:', '\tTwo:', '\t\t- x'], 0, 1, 4) === null);
 check('move to non-project returns null', moveBranchToProject(mvDoc, 4, 1, 4) === null);

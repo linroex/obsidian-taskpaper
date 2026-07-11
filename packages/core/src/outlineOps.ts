@@ -71,8 +71,9 @@ export function indentItem(lines: string[], line: number, tabSize: number): Outl
   return { lines: out, cursorLine: line };
 }
 
-/** Trailing run of tags (with leading spaces) at the end of a line body. */
-const TRAILING_TAGS_RE = /((?:\s+@[A-Za-z0-9._-]+(?:\([^)]*\))?)*)\s*$/;
+/** Trailing run of tags (with leading spaces) at the end of a line body.
+ * Tag values may contain escaped parens (`@x(a\)b)`), same as TAG_RE. */
+const TRAILING_TAGS_RE = /((?:\s+@[A-Za-z0-9._-]+(?:\((?:\\.|[^)\\])*\))?)*)\s*$/;
 
 /**
  * Convert a single line to the given kind in place — task = `- ` prefix,
@@ -89,7 +90,7 @@ export function setLineKind(lineText: string, kind: ItemKind): string {
   if (cur === 'task') {
     body = body.replace(/^-\s+/, '').replace(/^-$/, '');
   } else if (cur === 'project') {
-    body = body.replace(/:(\s*(@[A-Za-z0-9._-]+(\([^)]*\))?\s*)*)$/, '$1').trimEnd();
+    body = body.replace(/:(\s*(@[A-Za-z0-9._-]+(\((?:\\.|[^)\\])*\))?\s*)*)$/, '$1').trimEnd();
   }
   if (kind === 'task') {
     return `${indent}- ${body}`;
@@ -202,10 +203,13 @@ export function moveBranchToProject(
       .filter((i) => i.line >= item.line && i.line <= item.subtreeEnd)
       .map((i) => [i.line, i] as const),
   );
+  // Base the new indentation on the project's ACTUAL leading whitespace, not
+  // its structural level — they differ under mixed/extra indentation.
+  const baseIndent = (/^[\t ]*/.exec(lines[project.line])?.[0] ?? '') + '\t';
   const block: string[] = [];
   for (let ln = item.line; ln <= item.subtreeEnd; ln++) {
     const it = byLine.get(ln);
-    block.push(it ? '\t'.repeat(project.level + 1 + (it.level - item.level)) + it.text : lines[ln]);
+    block.push(it ? baseIndent + '\t'.repeat(it.level - item.level) + it.text : lines[ln]);
   }
   const out = lines.slice();
   out.splice(item.line, block.length);
