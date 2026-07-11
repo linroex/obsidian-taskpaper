@@ -1,6 +1,6 @@
 import { EditorState, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, DecorationSet, EditorView } from '@codemirror/view';
-import { runQuery, withAncestors } from '@taskpaper/core';
+import { attachedNotes, runQuery, withAncestors } from '@taskpaper/core';
 import { outlineOf } from './outline';
 
 export type FilterSpec =
@@ -95,6 +95,10 @@ function buildFilterDeco(state: EditorState, spec: FilterSpec): DecorationSet {
       for (const m of matches) {
         for (const a of withAncestors(m)) {
           visible.add(a.line); // 0-based
+        }
+        // A match brings its attached notes along (they belong to the item).
+        for (const n of attachedNotes(m)) {
+          visible.add(n.line);
         }
       }
     } catch {

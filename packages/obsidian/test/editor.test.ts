@@ -74,6 +74,21 @@ function setEq(a: Set<number>, b: Set<number>): boolean {
   check('query @today hides lines 3,4,5', setEq(hiddenLines(s), new Set([3, 4, 5])), [...hiddenLines(s)].join(','));
 }
 
+// --- a match brings its attached notes along ---
+{
+  const doc = [
+    'Inbox:',            // 1
+    '\t- a @today',      // 2  match
+    '\t\tnote of a',     // 3  shown (attached note)
+    '\t\t\tnested note', // 4  shown (note under note)
+    '\t- b',             // 5  hidden
+    '\t\tnote of b',     // 6  hidden (belongs to non-matching b)
+  ].join('\n');
+  const base = EditorState.create({ doc, extensions: [filterExtension] });
+  const s = base.update({ effects: setFilterEffect.of({ mode: 'query', query: '@today', hide: true }) }).state;
+  check('match keeps its note chain, not others', setEq(hiddenLines(s), new Set([5, 6])), [...hiddenLines(s)].join(','));
+}
+
 // --- focus filter: only Inbox's subtree (lines 1-3) visible; 4,5 hidden ---
 {
   const s = withFilter({ mode: 'focus', visible: new Set([0, 1, 2]), hide: true });

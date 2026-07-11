@@ -159,3 +159,22 @@ export function withAncestors(item: Item): Item[] {
   }
   return chain;
 }
+
+/**
+ * The note chain attached beneath an item: descendant notes reachable through
+ * notes only (a note under a NON-matching task inside a matched project stays
+ * with its task). Search results display these along with the match.
+ */
+export function attachedNotes(item: Item): Item[] {
+  const out: Item[] = [];
+  const walk = (node: Item) => {
+    for (const child of node.children) {
+      if (child.kind === 'note') {
+        out.push(child);
+        walk(child);
+      }
+    }
+  };
+  walk(item);
+  return out;
+}
