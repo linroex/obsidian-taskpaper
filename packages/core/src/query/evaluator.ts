@@ -27,6 +27,10 @@ export function evaluate(query: Query, outline: Outline): Set<Item> {
       const b = evaluate(query.b, outline);
       return new Set([...evaluate(query.a, outline)].filter((it) => !b.has(it)));
     }
+    case 'slice': {
+      const ordered = [...evaluate(query.a, outline)].sort((x, y) => x.line - y.line);
+      return new Set(applySlice(ordered, query.slice));
+    }
   }
 }
 
@@ -210,11 +214,13 @@ function compare(raw: string | undefined, rel: string, value: string, mods: stri
     return false;
   }
 
-  // `[l]` treats the value as a comma-separated list and matches when ANY
-  // element satisfies the relation (composes with the other modifiers).
+  // `[l]` treats BOTH sides as comma-separated lists (birch semantics); the
+  // remaining modifiers apply to each element comparison.
   if (mods.includes('l')) {
     const rest = mods.replace(/l/g, '');
-    return raw.split(',').some((part) => compare(part.trim(), rel, value, rest));
+    const left = raw.split(',').map((s) => s.trim());
+    const right = value.split(',').map((s) => s.trim());
+    return compareLists(left, rel, right, rest);
   }
 
   if (mods.includes('n')) {
@@ -259,6 +265,47 @@ function compare(raw: string | undefined, rel: string, value: string, mods: stri
       }
     default:
       return false;
+  }
+}
+
+// List relations mirror birch-outline: `=`/`!=` compare whole lists, ordering
+// relations require every right element to be satisfied by some left element,
+// `contains` is subset, `beginswith`/`endswith` match the right sequence at
+// the left list's start/end.
+function compareLists(left: string[], rel: string, right: string[], mods: string): boolean {
+  const eq = (a: string, b: string) => compare(a, '=', b, mods);
+  switch (rel) {
+    case '=':
+      return left.length === right.length && left.every((a, i) => eq(a, right[i]));
+    case '!=':
+      return !(left.length === right.length && left.every((a, i) => eq(a, right[i])));
+    case 'beginswith':
+      return (
+        left.length > 0 &&
+        right.length > 0 &&
+        right.length <= left.length &&
+        right.every((b, i) => eq(left[i], b))
+      );
+    case 'endswith': {
+      if (left.length === 0 || right.length === 0 || right.length > left.length) {
+        return false;
+      }
+      const offset = left.length - right.length;
+      return right.every((b, i) => eq(left[offset + i], b));
+    }
+    case 'contains':
+      return (
+        left.length > 0 &&
+        right.length > 0 &&
+        right.every((b) => left.some((a) => eq(a, b)))
+      );
+    default:
+      // < > <= >= matches: every right element satisfied by some left element.
+      return (
+        left.length > 0 &&
+        right.length > 0 &&
+        right.every((b) => left.some((a) => compare(a, rel, b, mods)))
+      );
   }
 }
 

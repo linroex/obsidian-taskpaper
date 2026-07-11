@@ -56,7 +56,9 @@ export interface Step {
 
 export type Query =
   | { t: 'path'; steps: Step[] }
-  | { t: SetOp; a: Query; b: Query };
+  | { t: SetOp; a: Query; b: Query }
+  /** A slice applied to a parenthesized expression's whole result, in document order. */
+  | { t: 'slice'; a: Query; slice: Slice };
 
 const RELATION_WORDS = new Set(['contains', 'beginswith', 'endswith', 'matches']);
 const TYPE_WORDS = new Set(['project', 'task', 'note', 'item']);
@@ -126,8 +128,12 @@ class Parser {
       try {
         const inner = this.parsePathExpr();
         const close = this.next();
-        if (close?.type === 'rparen' && this.atPathTermEnd()) {
-          return inner;
+        if (close?.type === 'rparen') {
+          // `(expr)[0]` — a trailing slice applies to the whole result.
+          const slice = this.readSlice();
+          if (this.atPathTermEnd()) {
+            return slice ? { t: 'slice', a: inner, slice } : inner;
+          }
         }
       } catch {
         // Fall through and re-parse as a predicate paren.

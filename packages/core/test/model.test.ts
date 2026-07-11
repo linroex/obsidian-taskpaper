@@ -133,12 +133,23 @@ check(
 );
 check('per-context slice example from guide', qa('project *//not @done[0]').join(',') === 'Inbox,Work', qa('project *//not @done[0]').join(','));
 
-// [l] list modifier: value is a comma-separated list, ANY element may match.
+// [l] list modifier: BOTH sides are comma-separated lists (birch semantics) —
+// `=` compares whole lists, `contains` is subset, ordering relations require
+// every right element to be satisfied by some left element.
 check('[l] contains element', qa('@priority contains[l] 1').join(',') === 'open', qa('@priority contains[l] 1').join(','));
-check('[l] equals element', qa('@priority =[l] 2').join(',') === 'open', qa('@priority =[l] 2').join(','));
+check('[l] contains subset', qa('@priority contains[l] 2,1').join(',') === 'open', qa('@priority contains[l] 2,1').join(','));
+check('[l] contains missing element fails', qa('@priority contains[l] 1,9').length === 0, qa('@priority contains[l] 1,9').join(','));
+check('[l] whole-list equality', qa('@priority =[l] 1,2').join(',') === 'open', qa('@priority =[l] 1,2').join(','));
+check('[l] partial list is not equal', qa('@priority =[l] 2').length === 0, qa('@priority =[l] 2').join(','));
+check('[l] beginswith sequence', qa('@priority beginswith[l] 1').join(',') === 'open', qa('@priority beginswith[l] 1').join(','));
+check('[l] endswith sequence', qa('@priority endswith[l] 2').join(',') === 'open', qa('@priority endswith[l] 2').join(','));
 check('[ln] numeric per element', qa('@priority <[ln] 2').join(',') === 'open', qa('@priority <[ln] 2').join(','));
 check('[ln] matches whole list too', qa('@priority =[ln] 3').join(',') === 'open2', qa('@priority =[ln] 3').join(','));
 check('[l] no match', qa('@priority =[l] 9').length === 0, qa('@priority =[l] 9').join(','));
+
+// Slice on a parenthesized expression applies to the whole result in document order.
+check('slice on parenthesized union', qa('(@today union @due)[0]').join(',') === 'a1', qa('(@today union @due)[0]').join(','));
+check('slice range on parenthesized expr', qa('(project Inbox//task)[1:]').join(',') === 'a2,a3', qa('(project Inbox//task)[1:]').join(','));
 
 // @id: items have no persisted id, so it is the 0-based line number as a string.
 check('@id equality', qa('@id = 1').join(',') === 'a1', qa('@id = 1').join(','));
