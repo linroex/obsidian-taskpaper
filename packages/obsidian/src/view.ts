@@ -2,7 +2,7 @@ import { setIcon, TextFileView, WorkspaceLeaf } from 'obsidian';
 import { EditorState, Extension } from '@codemirror/state';
 import { drawSelection, EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
-import { codeFolding, foldGutter, indentUnit } from '@codemirror/language';
+import { codeFolding, indentUnit } from '@codemirror/language';
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
 import {
   indentItem,
@@ -250,8 +250,8 @@ export class TaskPaperView extends TextFileView {
       drawSelection(),
       EditorState.tabSize.of(4),
       indentUnit.of('\t'),
+      // No fold gutter — the item handle dots toggle folds, like the original.
       codeFolding(),
-      foldGutter(),
       taskpaperFolding,
       highlightPlugin,
       indentGuides,
