@@ -134,26 +134,33 @@ body.taskpaper-no-strike .tp-done {
 }
 
 /* ---- Item handles (dot before items with children; hover-revealed) ---- */
+/* Zero-width: the handle must NOT shift the line's text (a 1em-wide inline
+ * widget made every parent line look one indent level deeper). The dot is
+ * drawn absolutely, hanging to the LEFT of the item text. */
 .tp-handle {
   display: inline-block;
-  width: 1em;
+  width: 0;
+  position: relative;
   cursor: grab;
-  opacity: 0;
-  transition: opacity 120ms ease-in-out;
   user-select: none;
   -webkit-user-select: none;
 }
 
 .tp-handle::before {
   content: '';
-  display: inline-block;
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  transform: translateY(-50%);
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--text-faint);
+  opacity: 0;
+  transition: opacity 120ms ease-in-out;
 }
 
-.taskpaper-view .cm-line:hover .tp-handle {
+.taskpaper-view .cm-line:hover .tp-handle::before {
   opacity: 1;
 }
 
