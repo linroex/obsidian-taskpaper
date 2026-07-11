@@ -1,6 +1,6 @@
 import { Item, Outline } from '../model';
 import { parseDate } from '../dates';
-import { Axis, parseQuery, Predicate, Query, Step } from './parser';
+import { Axis, parseQuery, Predicate, Query, Slice, Step } from './parser';
 
 /** Parse and evaluate a query against an outline, returning the set of matching items. */
 export function runQuery(input: string, outline: Outline): Set<Item> {
@@ -9,27 +9,69 @@ export function runQuery(input: string, outline: Outline): Set<Item> {
 }
 
 export function evaluate(query: Query, outline: Outline): Set<Item> {
-  if (query.steps.length === 0) {
+  switch (query.t) {
+    case 'path':
+      return evaluatePath(query.steps, outline);
+    case 'union': {
+      const out = evaluate(query.a, outline);
+      for (const it of evaluate(query.b, outline)) {
+        out.add(it);
+      }
+      return out;
+    }
+    case 'intersect': {
+      const b = evaluate(query.b, outline);
+      return new Set([...evaluate(query.a, outline)].filter((it) => b.has(it)));
+    }
+    case 'except': {
+      const b = evaluate(query.b, outline);
+      return new Set([...evaluate(query.a, outline)].filter((it) => !b.has(it)));
+    }
+  }
+}
+
+function evaluatePath(steps: Step[], outline: Outline): Set<Item> {
+  if (steps.length === 0) {
     return new Set();
   }
 
-  const first = query.steps[0];
-  let context = firstCandidates(first, outline).filter((it) => matchPred(first.pred, it));
+  const first = steps[0];
+  let context = applySlice(
+    firstCandidates(first, outline).filter((it) => matchPred(first.pred, it)),
+    first.slice,
+  );
 
-  for (let s = 1; s < query.steps.length; s++) {
-    const step = query.steps[s];
+  for (let s = 1; s < steps.length; s++) {
+    const step = steps[s];
     const next = new Set<Item>();
     for (const ctx of context) {
+      // Slices apply to the matched set within each evaluation context, so
+      // e.g. `project *//not @done[0]` keeps the first match per project.
+      const matched: Item[] = [];
       for (const cand of axisNodes(effectiveAxis(step), ctx)) {
         if (matchPred(step.pred, cand)) {
-          next.add(cand);
+          matched.push(cand);
         }
+      }
+      for (const it of applySlice(matched, step.slice)) {
+        next.add(it);
       }
     }
     context = [...next];
   }
 
   return new Set(context);
+}
+
+function applySlice(items: Item[], slice: Slice | undefined): Item[] {
+  if (!slice) {
+    return items;
+  }
+  if (slice.index !== undefined) {
+    const idx = slice.index < 0 ? items.length + slice.index : slice.index;
+    return idx >= 0 && idx < items.length ? [items[idx]] : [];
+  }
+  return items.slice(slice.start ?? 0, slice.end);
 }
 
 function effectiveAxis(step: Step): Axis {
@@ -137,7 +179,7 @@ function matchPred(pred: Predicate, item: Item): boolean {
 
 function hasAttr(item: Item, attr: string): boolean {
   const lower = attr.toLowerCase();
-  if (lower === 'text' || lower === 'type' || lower === 'line' || lower === 'level') {
+  if (lower === 'text' || lower === 'type' || lower === 'line' || lower === 'level' || lower === 'id') {
     return true;
   }
   return item.tags.has(attr);
@@ -154,6 +196,10 @@ function getAttr(item: Item, attr: string): string | undefined {
       return String(item.line + 1);
     case 'level':
       return String(item.level);
+    case 'id':
+      // Items carry no persisted id, so @id is defined as the 0-based line
+      // number rendered as a string — stable for the lifetime of the outline.
+      return String(item.line);
     default:
       return item.tags.has(attr) ? item.tags.get(attr) : undefined;
   }
@@ -162,6 +208,13 @@ function getAttr(item: Item, attr: string): string | undefined {
 function compare(raw: string | undefined, rel: string, value: string, mods: string): boolean {
   if (raw === undefined) {
     return false;
+  }
+
+  // `[l]` treats the value as a comma-separated list and matches when ANY
+  // element satisfies the relation (composes with the other modifiers).
+  if (mods.includes('l')) {
+    const rest = mods.replace(/l/g, '');
+    return raw.split(',').some((part) => compare(part.trim(), rel, value, rest));
   }
 
   if (mods.includes('n')) {

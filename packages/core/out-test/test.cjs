@@ -427,6 +427,8 @@ function isBreak(c) {
 // src/query/parser.ts
 var RELATION_WORDS = /* @__PURE__ */ new Set(["contains", "beginswith", "endswith", "matches"]);
 var TYPE_WORDS = /* @__PURE__ */ new Set(["project", "task", "note", "item"]);
+var SET_OP_WORDS = /* @__PURE__ */ new Set(["union", "intersect", "except"]);
+var SLICE_RE = /^(-?\d+|(-?\d+)?:(-?\d+)?)$/;
 var AXIS_WORDS = /* @__PURE__ */ new Set([
   "child",
   "descendant",
@@ -458,6 +460,50 @@ var Parser = class {
     return !!t && t.type === "word" && t.value.toLowerCase() === value;
   }
   parseQuery() {
+    const query = this.parsePathExpr();
+    if (this.peek()) {
+      throw new Error(`Unexpected token "${this.peek().value}" in query`);
+    }
+    return query;
+  }
+  // Set operations have the lowest precedence and associate left.
+  parsePathExpr() {
+    let left = this.parsePathTerm();
+    while (this.peekSetOp()) {
+      const op = this.next().value.toLowerCase();
+      const right = this.parsePathTerm();
+      left = { t: op, a: left, b: right };
+    }
+    return left;
+  }
+  // A parenthesis may wrap a whole path expression (`(a//b union //c)`) or
+  // merely group a predicate (`(a or b) and c`). Try the path-expression
+  // reading first and backtrack when the paren turns out to be grouping.
+  parsePathTerm() {
+    if (this.peek()?.type === "lparen") {
+      const save = this.i;
+      this.next();
+      try {
+        const inner = this.parsePathExpr();
+        const close = this.next();
+        if (close?.type === "rparen" && this.atPathTermEnd()) {
+          return inner;
+        }
+      } catch {
+      }
+      this.i = save;
+    }
+    return this.parsePath();
+  }
+  atPathTermEnd() {
+    const t = this.peek();
+    return !t || t.type === "rparen" || this.peekSetOp();
+  }
+  peekSetOp() {
+    const t = this.peek();
+    return !!t && t.type === "word" && SET_OP_WORDS.has(t.value.toLowerCase());
+  }
+  parsePath() {
     const steps = [];
     let firstSep = "descendant";
     if (this.peek()?.type === "dslash") {
@@ -473,10 +519,7 @@ var Parser = class {
       const sep = sepTok.type === "dslash" ? "descendant" : "child";
       steps.push(this.parseStep(sep));
     }
-    if (this.peek()) {
-      throw new Error(`Unexpected token "${this.peek().value}" in query`);
-    }
-    return { steps };
+    return { t: "path", steps };
   }
   parseStep(sep) {
     let axis;
@@ -487,7 +530,8 @@ var Parser = class {
       axis = t.value.toLowerCase();
     }
     const pred = this.parseOr();
-    return { sep, axis, pred };
+    const slice = this.readSlice();
+    return { sep, axis, pred, slice };
   }
   parseOr() {
     let left = this.parseAnd();
@@ -534,7 +578,7 @@ var Parser = class {
       if (w === "and" || w === "or") {
         return false;
       }
-      if (RELATION_WORDS.has(w)) {
+      if (RELATION_WORDS.has(w) || SET_OP_WORDS.has(w)) {
         return false;
       }
       if (AXIS_WORDS.has(w) && this.tokens[this.i + 1]?.type === "coloncolon") {
@@ -560,9 +604,7 @@ var Parser = class {
     if (t.type === "tag") {
       const rel = this.tryReadRelation();
       if (rel) {
-        const value = this.readValue();
-        const mods = this.readMods();
-        return { t: "cmp", attr: t.value, rel, value, mods };
+        return this.finishComparison(t.value, rel);
       }
       return { t: "has", attr: t.value };
     }
@@ -571,18 +613,27 @@ var Parser = class {
     }
     if (t.type === "word") {
       const w = t.value.toLowerCase();
+      if (w === "*") {
+        return { t: "type", kind: "item" };
+      }
       if (TYPE_WORDS.has(w)) {
         return { t: "type", kind: w };
       }
       const rel = this.tryReadRelation();
       if (rel) {
-        const value = this.readValue();
-        const mods = this.readMods();
-        return { t: "cmp", attr: t.value, rel, value, mods };
+        return this.finishComparison(t.value, rel);
       }
       return { t: "text", value: t.value };
     }
     throw new Error(`Unexpected token "${t.value}" in query`);
+  }
+  // Modifiers may follow the relation (`<[d] tomorrow`, TaskPaper-style) or
+  // trail the value (`<= today [d]`); accept both.
+  finishComparison(attr, rel) {
+    const before = this.readMods();
+    const value = this.readValue();
+    const after = this.readMods();
+    return { t: "cmp", attr, rel, value, mods: before + after };
   }
   tryReadRelation() {
     const t = this.peek();
@@ -614,11 +665,26 @@ var Parser = class {
   }
   readMods() {
     const t = this.peek();
-    if (t && t.type === "mod") {
+    if (t && t.type === "mod" && /^[A-Za-z]+$/.test(t.value)) {
       this.next();
       return t.value.toLowerCase();
     }
     return "";
+  }
+  readSlice() {
+    const t = this.peek();
+    if (!t || t.type !== "mod" || !SLICE_RE.test(t.value)) {
+      return void 0;
+    }
+    this.next();
+    if (!t.value.includes(":")) {
+      return { index: parseInt(t.value, 10) };
+    }
+    const [startText, endText] = t.value.split(":");
+    return {
+      start: startText === "" ? void 0 : parseInt(startText, 10),
+      end: endText === "" ? void 0 : parseInt(endText, 10)
+    };
   }
 };
 
@@ -628,24 +694,62 @@ function runQuery(input, outline2) {
   return evaluate(query, outline2);
 }
 function evaluate(query, outline2) {
-  if (query.steps.length === 0) {
+  switch (query.t) {
+    case "path":
+      return evaluatePath(query.steps, outline2);
+    case "union": {
+      const out2 = evaluate(query.a, outline2);
+      for (const it of evaluate(query.b, outline2)) {
+        out2.add(it);
+      }
+      return out2;
+    }
+    case "intersect": {
+      const b = evaluate(query.b, outline2);
+      return new Set([...evaluate(query.a, outline2)].filter((it) => b.has(it)));
+    }
+    case "except": {
+      const b = evaluate(query.b, outline2);
+      return new Set([...evaluate(query.a, outline2)].filter((it) => !b.has(it)));
+    }
+  }
+}
+function evaluatePath(steps, outline2) {
+  if (steps.length === 0) {
     return /* @__PURE__ */ new Set();
   }
-  const first = query.steps[0];
-  let context = firstCandidates(first, outline2).filter((it) => matchPred(first.pred, it));
-  for (let s = 1; s < query.steps.length; s++) {
-    const step = query.steps[s];
+  const first = steps[0];
+  let context = applySlice(
+    firstCandidates(first, outline2).filter((it) => matchPred(first.pred, it)),
+    first.slice
+  );
+  for (let s = 1; s < steps.length; s++) {
+    const step = steps[s];
     const next = /* @__PURE__ */ new Set();
     for (const ctx of context) {
+      const matched = [];
       for (const cand of axisNodes(effectiveAxis(step), ctx)) {
         if (matchPred(step.pred, cand)) {
-          next.add(cand);
+          matched.push(cand);
         }
+      }
+      for (const it of applySlice(matched, step.slice)) {
+        next.add(it);
       }
     }
     context = [...next];
   }
   return new Set(context);
+}
+function applySlice(items, slice) {
+  if (!slice) {
+    return items;
+  }
+  if (slice.index !== void 0) {
+    const idx = slice.index < 0 ? items.length + slice.index : slice.index;
+    return idx >= 0 && idx < items.length ? [items[idx]] : [];
+  }
+  return items.slice(slice.start ?? 0, slice.end);
 }
 function effectiveAxis(step) {
   if (step.axis) {
@@ -741,7 +845,7 @@ function matchPred(pred, item) {
 }
 function hasAttr(item, attr) {
   const lower = attr.toLowerCase();
-  if (lower === "text" || lower === "type" || lower === "line" || lower === "level") {
+  if (lower === "text" || lower === "type" || lower === "line" || lower === "level" || lower === "id") {
     return true;
   }
   return item.tags.has(attr);
@@ -757,6 +861,8 @@ function getAttr(item, attr) {
       return String(item.line + 1);
     case "level":
       return String(item.level);
+    case "id":
+      return String(item.line);
     default:
       return item.tags.has(attr) ? item.tags.get(attr) : void 0;
   }
@@ -764,6 +870,10 @@ function getAttr(item, attr) {
 function compare(raw, rel, value, mods) {
   if (raw === void 0) {
     return false;
+  }
+  if (mods.includes("l")) {
+    const rest = mods.replace(/l/g, "");
+    return raw.split(",").some((part) => compare(part.trim(), rel, value, rest));
   }
   if (mods.includes("n")) {
     return compareNumeric(parseFloat(raw), rel, parseFloat(value));
@@ -1076,6 +1186,57 @@ var dueToday = buildOutline([`Work:`, `	- ship @due(${todayStr})`], 4);
 var qd = (query) => [...runQuery(query, dueToday)].length;
 check("due today matches = today [d]", qd("@due = today [d]") === 1, String(qd("@due = today [d]")));
 check("due today matches <= today [d]", qd("@due <= today [d]") === 1, String(qd("@due <= today [d]")));
+var advDoc = [
+  "Inbox:",
+  "	- a1 @today",
+  "	- a2 @due(2020-01-01)",
+  "	- a3",
+  "Work:",
+  "	- done parent @done",
+  "		- child of done",
+  "			- grandchild of done",
+  "	- open @priority(1,2)",
+  "	- open2 @priority(3)",
+  "	- open3 @today @done"
+];
+var adv = buildOutline(advDoc, 4);
+var qa = (query) => [...runQuery(query, adv)].map((i) => i.displayText.replace(/\s*@\S+/g, "")).sort();
+check("union with mod after relation", qa("@today union @due <[d] tomorrow").join(",") === "a1,a2,open3", qa("@today union @due <[d] tomorrow").join(","));
+check(
+  "except drops done subtrees",
+  qa("not @done except @done//*").join(",") === "Inbox,Work,a1,a2,a3,open,open2",
+  qa("not @done except @done//*").join(",")
+);
+check(
+  "parenthesized path union then except",
+  qa("(project Inbox//* union //@today) except //@done").join(",") === "Inbox,a1,a2,a3",
+  qa("(project Inbox//* union //@today) except //@done").join(",")
+);
+check("intersect", qa("@today intersect @done").join(",") === "open3", qa("@today intersect @done").join(","));
+check("set ops associate left", qa("@today union @due except @done").join(",") === "a1,a2", qa("@today union @due except @done").join(","));
+check("predicate parens still group", qa("task and not (@done or @today)").join(",") === "a2,a3,child of done,grandchild of done,open,open2", qa("task and not (@done or @today)").join(","));
+check("leading predicate paren backtracks", qa("(@today or @done) and task").join(",") === "a1,done parent,open3", qa("(@today or @done) and task").join(","));
+check("slice first task", qa("task[0]").join(",") === "a1", qa("task[0]").join(","));
+check("slice negative index", qa("task[-1]").join(",") === "open3", qa("task[-1]").join(","));
+check("slice range", qa("task[0:2]").join(",") === "a1,a2", qa("task[0:2]").join(","));
+check("slice open start", qa("task[:2]").join(",") === "a1,a2", qa("task[:2]").join(","));
+check("slice open end", qa("task[6:]").join(",") === "open,open2,open3", qa("task[6:]").join(","));
+check("slice negative range", qa("task[-2:]").join(",") === "open2,open3", qa("task[-2:]").join(","));
+check("slice out of range empty", qa("task[99]").length === 0, qa("task[99]").join(","));
+check(
+  "per-context slice keeps one per project",
+  qa("project *//task and not @done[0]").join(",") === "a1,child of done",
+  qa("project *//task and not @done[0]").join(",")
+);
+check("per-context slice example from guide", qa("project *//not @done[0]").join(",") === "Inbox,Work", qa("project *//not @done[0]").join(","));
+check("[l] contains element", qa("@priority contains[l] 1").join(",") === "open", qa("@priority contains[l] 1").join(","));
+check("[l] equals element", qa("@priority =[l] 2").join(",") === "open", qa("@priority =[l] 2").join(","));
+check("[ln] numeric per element", qa("@priority <[ln] 2").join(",") === "open", qa("@priority <[ln] 2").join(","));
+check("[ln] matches whole list too", qa("@priority =[ln] 3").join(",") === "open2", qa("@priority =[ln] 3").join(","));
+check("[l] no match", qa("@priority =[l] 9").length === 0, qa("@priority =[l] 9").join(","));
+check("@id equality", qa("@id = 1").join(",") === "a1", qa("@id = 1").join(","));
+check("@id numeric compare", qa("@id <[n] 3").join(",") === "Inbox,a1,a2", qa("@id <[n] 3").join(","));
+check("@id present on all items", qa("@id").length === adv.items.length, String(qa("@id").length));
 check("addTag done", addTag("- foo", "done", "2026-07-08") === "- foo @done(2026-07-08)");
 check("addTag idempotent value replace", addTag("- foo @done(2026-01-01)", "done", "2026-07-08") === "- foo @done(2026-07-08)");
 check("removeTag", removeTag("- foo @today @flag", "today") === "- foo @flag");
