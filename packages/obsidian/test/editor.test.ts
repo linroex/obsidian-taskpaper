@@ -27,6 +27,7 @@ import {
   settingsSignature,
   sidebarSignature,
   toggleSelection,
+  validateSelection,
   visibleTagCounts,
 } from '../src/sidebarLogic';
 
@@ -185,14 +186,15 @@ check('signature changes when file changes', sidebarSignature('a.taskpaper', 100
   const mixed = composeSelection([proj(0, 'Work'), tag('@today')]);
   check(
     'project + tag intersect (tag scoped to project)',
-    mixed.type === 'query' && mixed.query === '((project "Work"//*)) intersect ((@today))',
+    mixed.type === 'query' && mixed.query === '(((@id = 0 and project)//*)) intersect ((@today))',
     JSON.stringify(mixed),
   );
   const three = composeSelection([proj(0, 'A'), proj(5, 'B'), search('not @done')]);
   check(
     'two projects union, search intersects',
     three.type === 'query' &&
-      three.query === '((project "A"//*) union (project "B"//*)) intersect ((not @done))',
+      three.query ===
+        '(((@id = 0 and project)//*) union ((@id = 5 and project)//*)) intersect ((not @done))',
     JSON.stringify(three),
   );
   // The composed queries actually run: @today inside Work only.
@@ -206,6 +208,30 @@ check('signature changes when file changes', sidebarSignature('a.taskpaper', 100
   }
   check('selectionSignature stable', selectionSignature([tag('@a')]) === selectionSignature([tag('@a')]));
   check('selectionSignature differs', selectionSignature([tag('@a')]) !== selectionSignature([]));
+
+  // Exact @id matching: duplicate project names never collide.
+  const dupOutline = buildOutline(['Work:', '\t- a @x', 'Work:', '\t- b @x'], 4);
+  const dup = composeSelection([proj(2, 'Work'), tag('@x')]);
+  if (dup.type === 'query') {
+    const dupHits = [...runQuery(dup.query, dupOutline)].map((i) => i.displayText);
+    check('duplicate-named projects select exactly by line', dupHits.length === 1 && dupHits[0].startsWith('b'), dupHits.join('|'));
+  }
+
+  // Stale project lines are dropped when they no longer resolve to the same project.
+  const names = new Map([[0, 'Work'], [3, 'Home']]);
+  const nameAt = (line: number) => names.get(line);
+  check(
+    'validateSelection keeps resolving projects',
+    validateSelection([proj(0, 'Work'), tag('@a')], nameAt).length === 2,
+  );
+  check(
+    'validateSelection drops shifted project lines',
+    eqJson(validateSelection([proj(1, 'Work'), tag('@a')], nameAt), [tag('@a')]),
+  );
+  check(
+    'validateSelection drops renamed projects',
+    eqJson(validateSelection([proj(3, 'Work')], nameAt), []),
+  );
 }
 
 // --- tag click: toggling the filter ---

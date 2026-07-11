@@ -1,5 +1,3 @@
-import { quoteQueryValue } from '@taskpaper/core';
-
 /** A named query shown in the sidebar's Searches section for every document. */
 export interface GlobalSearch {
   name: string;
@@ -63,12 +61,29 @@ export function composeSelection(selection: SidebarSelectionItem[]): ComposedFil
   for (const kind of ['project', 'tag', 'search'] as const) {
     const parts = selection
       .filter((s) => s.kind === kind)
-      .map((s) => (s.kind === 'project' ? `project ${quoteQueryValue(s.name)}//*` : s.query));
+      // Projects match EXACTLY by line (@id) — name matching is substring-
+      // based and would confuse duplicate/prefix/unnamed projects. Stale
+      // lines are validated against the outline before composing.
+      .map((s) => (s.kind === 'project' ? `(@id = ${s.line} and project)//*` : s.query));
     if (parts.length > 0) {
       groups.push(parts.map((p) => `(${p})`).join(' union '));
     }
   }
   return { type: 'query', query: groups.map((g) => `(${g})`).join(' intersect ') };
+}
+
+/**
+ * Drop selected projects whose stored line no longer resolves to a project
+ * with the same name — document edits shift lines, and a stale line would
+ * focus (or query) the wrong item. `projectNameAt` maps line → cleaned
+ * project name, or undefined when that line is not a project.
+ */
+export function validateSelection(
+  selection: SidebarSelectionItem[],
+  projectNameAt: (line: number) => string | undefined,
+): SidebarSelectionItem[] {
+  const valid = selection.filter((s) => s.kind !== 'project' || projectNameAt(s.line) === s.name);
+  return valid.length === selection.length ? selection : valid;
 }
 
 /** Stable signature component for the selection (for the render guard). */

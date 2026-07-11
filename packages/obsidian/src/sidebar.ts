@@ -22,8 +22,14 @@ import {
   sidebarSignature,
   SidebarSelectionItem,
   toggleSelection,
+  validateSelection,
   visibleTagCounts,
 } from './sidebarLogic';
+
+/** A project's display text minus its trailing tags — the selection's name key. */
+function cleanProjectName(displayText: string): string {
+  return displayText.replace(/\s*@[A-Za-z0-9._-]+(\([^)]*\))?/g, '').trim();
+}
 import type TaskPaperPlugin from './main';
 import type { TaskPaperView } from './view';
 
@@ -75,13 +81,22 @@ export class TaskPaperSidebarView extends ItemView {
 
     // When the editor's filter no longer matches what the selection composes
     // to (Escape, Filter…, editor tag click, …), the selection is stale — drop
-    // it so highlights never lie.
+    // it so highlights never lie. Project rows are additionally validated
+    // against the outline: edits shift lines, and a stale line must never be
+    // focused or queried.
     if (view && view.editor && view.sidebarSelection.length > 0) {
+      const outline = outlineOf(view.editor.state);
+      view.sidebarSelection = validateSelection(view.sidebarSelection, (line) => {
+        const item = outline.items.find((i) => i.line === line);
+        return item?.kind === 'project' ? cleanProjectName(item.displayText) : undefined;
+      });
       const composed = composeSelection(view.sidebarSelection);
       const matches =
-        composed.type === 'focus'
-          ? spec?.mode === 'focus' && view.focusedLine === composed.line
-          : composed.type === 'query' && spec?.mode === 'query' && spec.query === composed.query;
+        composed.type === 'none'
+          ? spec === null
+          : composed.type === 'focus'
+            ? spec?.mode === 'focus' && view.focusedLine === composed.line
+            : spec?.mode === 'query' && spec.query === composed.query;
       if (!matches) {
         view.sidebarSelection = [];
       }
@@ -191,8 +206,11 @@ export class TaskPaperSidebarView extends ItemView {
     for (const p of projects) {
       const el = projSection.createDiv({ cls: 'tp-sb-item tp-sb-project' });
       el.style.paddingLeft = `${8 + p.level * 14}px`;
-      const name = p.displayText.replace(/\s*@[A-Za-z0-9._-]+(\([^)]*\))?/g, '').trim();
-      const selItem: SidebarSelectionItem = { kind: 'project', line: p.line, name };
+      const selItem: SidebarSelectionItem = {
+        kind: 'project',
+        line: p.line,
+        name: cleanProjectName(p.displayText),
+      };
       if (isSelected(selection, selItem) || view.focusedLine === p.line) {
         el.addClass('is-focused');
       }
@@ -256,6 +274,14 @@ export class TaskPaperSidebarView extends ItemView {
       view.focusedLine = null;
       view.editor.dispatch({ effects: setFilterEffect.of(null) });
     } else if (composed.type === 'focus') {
+      if (composed.line + 1 > view.editor.state.doc.lines) {
+        // Stale line (document shrank since selection) — bail out safely.
+        view.sidebarSelection = [];
+        view.focusedLine = null;
+        view.editor.dispatch({ effects: setFilterEffect.of(null) });
+        this.plugin.refreshSidebar();
+        return;
+      }
       const outline = outlineOf(view.editor.state);
       view.focusedLine = composed.line;
       view.editor.dispatch({
