@@ -1,9 +1,18 @@
-import { ItemView, WorkspaceLeaf } from 'obsidian';
+import { ItemView, Menu, WorkspaceLeaf } from 'obsidian';
 import { EditorSelection } from '@codemirror/state';
-import { focusVisibleLines, Item, projectStats, savedSearches, toggleFocusTarget } from '@taskpaper/core';
+import {
+  focusVisibleLines,
+  Item,
+  projectStats,
+  rewriteSearchLine,
+  SavedSearch,
+  savedSearches,
+  toggleFocusTarget,
+} from '@taskpaper/core';
 import { outlineOf } from './editor/outline';
 import { setFilterEffect } from './editor/filter';
-import { parseTagList, settingsSignature, sidebarSignature, visibleTagCounts } from './sidebarLogic';
+import { SaveSearchModal } from './modals';
+import { GlobalSearch, parseTagList, settingsSignature, sidebarSignature, visibleTagCounts } from './sidebarLogic';
 import type TaskPaperPlugin from './main';
 import type { TaskPaperView } from './view';
 
@@ -75,35 +84,48 @@ export class TaskPaperSidebarView extends ItemView {
     // Searches section: global searches (from settings) first, then the document's own @search items.
     const globalSearches = this.plugin.settings.globalSearches.filter((s) => s.query.trim() !== '');
     const searches = savedSearches(outline);
-    if (globalSearches.length > 0 || searches.length > 0) {
-      const searchSection = container.createDiv({ cls: 'tp-sb-section' });
-      searchSection.createDiv({ cls: 'tp-sb-heading', text: 'Searches' });
-      const addSearch = (name: string, query: string, global: boolean) => {
-        const el = searchSection.createDiv({
-          cls: global ? 'tp-sb-item tp-sb-search tp-sb-search-global' : 'tp-sb-item tp-sb-search',
+    const searchSection = container.createDiv({ cls: 'tp-sb-section' });
+    const searchHeading = searchSection.createDiv({ cls: 'tp-sb-heading', text: 'Searches' });
+    // TaskPaper parity: right-click the "Searches" heading to create a new search.
+    searchHeading.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const menu = new Menu();
+      menu.addItem((mi) =>
+        mi
+          .setTitle('新增搜尋')
+          .setIcon('plus')
+          .onClick(() => this.plugin.commands.saveSearch(view)),
+      );
+      menu.showAtMouseEvent(e);
+    });
+    const addSearch = (name: string, query: string, global: boolean): HTMLElement => {
+      const el = searchSection.createDiv({
+        cls: global ? 'tp-sb-item tp-sb-search tp-sb-search-global' : 'tp-sb-item tp-sb-search',
+      });
+      el.createSpan({ cls: 'tp-sb-search-name', text: name });
+      if (global) {
+        el.createSpan({ cls: 'tp-sb-global-badge', text: '全域' });
+      }
+      el.setAttr('title', query);
+      el.onclick = () => {
+        view.editor.dispatch({
+          effects: setFilterEffect.of({
+            mode: 'query',
+            query,
+            hide: this.plugin.settings.filterHidesInsteadOfDims,
+          }),
         });
-        el.createSpan({ cls: 'tp-sb-search-name', text: name });
-        if (global) {
-          el.createSpan({ cls: 'tp-sb-global-badge', text: '全域' });
-        }
-        el.setAttr('title', query);
-        el.onclick = () => {
-          view.editor.dispatch({
-            effects: setFilterEffect.of({
-              mode: 'query',
-              query,
-              hide: this.plugin.settings.filterHidesInsteadOfDims,
-            }),
-          });
-          this.app.workspace.revealLeaf(view.leaf);
-        };
+        this.app.workspace.revealLeaf(view.leaf);
       };
-      for (const s of globalSearches) {
-        addSearch(s.name.trim() || s.query, s.query, true);
-      }
-      for (const s of searches) {
-        addSearch(s.name, s.query, false);
-      }
+      return el;
+    };
+    for (const s of globalSearches) {
+      const el = addSearch(s.name.trim() || s.query, s.query, true);
+      el.addEventListener('contextmenu', (e) => this.showGlobalSearchMenu(e, s));
+    }
+    for (const s of searches) {
+      const el = addSearch(s.name, s.query, false);
+      el.addEventListener('contextmenu', (e) => this.showDocumentSearchMenu(e, view, s));
     }
 
     // Projects section.
@@ -162,6 +184,85 @@ export class TaskPaperSidebarView extends ItemView {
         this.plugin.refreshSidebar();
       };
     }
+  }
+
+  /** Context menu for a global search (stored in the plugin settings): 編輯 / 刪除. */
+  private showGlobalSearchMenu(e: MouseEvent, search: GlobalSearch): void {
+    e.preventDefault();
+    const menu = new Menu();
+    menu.addItem((mi) =>
+      mi
+        .setTitle('編輯')
+        .setIcon('pencil')
+        .onClick(() => {
+          new SaveSearchModal(
+            this.app,
+            async (name, query) => {
+              search.name = name;
+              search.query = query;
+              await this.plugin.saveSettings();
+              this.plugin.refreshSidebar();
+            },
+            { title: '編輯搜尋', name: search.name, query: search.query },
+          ).open();
+        }),
+    );
+    menu.addItem((mi) =>
+      mi
+        .setTitle('刪除')
+        .setIcon('trash')
+        .onClick(async () => {
+          const index = this.plugin.settings.globalSearches.indexOf(search);
+          if (index >= 0) {
+            this.plugin.settings.globalSearches.splice(index, 1);
+          }
+          await this.plugin.saveSettings();
+          this.plugin.refreshSidebar();
+        }),
+    );
+    menu.showAtMouseEvent(e);
+  }
+
+  /** Context menu for one of the document's @search items: 編輯搜尋 / 刪除搜尋. */
+  private showDocumentSearchMenu(e: MouseEvent, view: TaskPaperView, search: SavedSearch): void {
+    e.preventDefault();
+    const menu = new Menu();
+    menu.addItem((mi) =>
+      mi
+        .setTitle('編輯搜尋')
+        .setIcon('pencil')
+        .onClick(() => {
+          new SaveSearchModal(
+            this.app,
+            (name, query) => {
+              const doc = view.editor.state.doc;
+              if (search.line + 1 > doc.lines) {
+                return;
+              }
+              const line = doc.line(search.line + 1);
+              view.editor.dispatch({
+                changes: { from: line.from, to: line.to, insert: rewriteSearchLine(line.text, name, query) },
+              });
+            },
+            { title: '編輯搜尋', name: search.name, query: search.query },
+          ).open();
+        }),
+    );
+    menu.addItem((mi) =>
+      mi
+        .setTitle('刪除搜尋')
+        .setIcon('trash')
+        .onClick(() => {
+          const doc = view.editor.state.doc;
+          if (search.line + 1 > doc.lines) {
+            return;
+          }
+          const line = doc.line(search.line + 1);
+          const to = search.line + 1 < doc.lines ? doc.line(search.line + 2).from : line.to;
+          view.editor.dispatch({ changes: { from: line.from, to, insert: '' } });
+        }),
+    );
+    menu.showAtMouseEvent(e);
   }
 
   /** Clicking a project focuses it; clicking the focused project again shows everything. */

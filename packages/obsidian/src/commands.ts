@@ -19,8 +19,10 @@ import {
   moveItemDown,
   moveItemUp,
   outdentItem,
+  planArchiveDone,
   removeAllTags,
   removeTag,
+  savedSearches,
   setLineKind,
   setTagValue,
   todayStamp,
@@ -28,7 +30,15 @@ import {
 import { outlineOf } from './editor/outline';
 import { setFilterEffect } from './editor/filter';
 import { applyOutlineOp, dispatchOutlineEdit, docLines } from './editor/outlineEdit';
-import { DateModal, QueryModal, ProjectSuggestModal, SaveSearchModal, TextPromptModal } from './modals';
+import {
+  DateModal,
+  QueryModal,
+  ProjectSuggestModal,
+  SaveSearchModal,
+  SearchEntry,
+  SearchSuggestModal,
+  TextPromptModal,
+} from './modals';
 import type TaskPaperPlugin from './main';
 import { TaskPaperView } from './view';
 
@@ -348,82 +358,73 @@ export class TaskPaperCommands {
 
   archiveDone(view: TaskPaperView): void {
     const state = view.editor.state;
-    const outline = outlineOf(state);
-    const archiveName = this.settings.archiveProjectName;
     const nl = state.lineBreak;
-
-    const archiveProject = outline.roots.find(
-      (r) => r.kind === 'project' && r.displayText.trim() === archiveName,
-    );
-
-    const doneSet = new Set(outline.items.filter((i) => i.tags.has('done')));
-    const roots = [...doneSet].filter((item) => {
-      if (archiveProject && isWithin(item, archiveProject)) {
-        return false;
-      }
-      for (let a = item.parent; a; a = a.parent) {
-        if (doneSet.has(a)) {
-          return false;
-        }
-      }
-      return true;
+    const plan = planArchiveDone(docLines(state), 4, {
+      archiveName: this.settings.archiveProjectName,
+      addProjectTag: this.settings.addProjectTagWhenArchiving,
+      removeExtraTags: this.settings.removeExtraTagsWhenArchiving,
     });
-
-    if (roots.length === 0) {
+    if (!plan) {
       new Notice('No @done items to archive.');
       return;
     }
 
-    const blocks: string[] = [];
-    for (const root of roots) {
-      const projectName = enclosingProjectName(root, archiveName);
-      const lines: string[] = [];
-      for (let ln = root.line; ln <= root.subtreeEnd; ln++) {
-        const item = outline.items.find((i) => i.line === ln);
-        const text = state.doc.line(ln + 1).text;
-        if (!item) {
-          lines.push(text.trim().length === 0 ? '' : '\t'.repeat(root.level + 1) + text.trim());
-          continue;
-        }
-        let body = item.text;
-        if (ln === root.line && projectName && !item.tags.has('project')) {
-          body = addTag(body, 'project', projectName);
-        }
-        const newLevel = 1 + (item.level - root.level);
-        lines.push('\t'.repeat(newLevel) + body);
-      }
-      blocks.push(lines.join(nl));
+    // The whole document is being archived — replace it outright.
+    const [first] = plan.removals;
+    if (plan.removals.length === 1 && first[0] === 0 && first[1] === state.doc.lines) {
+      view.editor.dispatch({
+        changes: { from: 0, to: state.doc.length, insert: plan.insertLines.join(nl) },
+      });
+      return;
     }
 
-    const changes: ChangeSpec[] = [];
-    for (const root of roots) {
-      const from = state.doc.line(root.line + 1).from;
-      const to =
-        root.subtreeEnd + 1 < state.doc.lines
-          ? state.doc.line(root.subtreeEnd + 2).from
-          : state.doc.line(root.subtreeEnd + 1).to;
-      changes.push({ from, to, insert: '' });
-    }
-
-    const archivedText = blocks.join(nl) + nl;
-    if (archiveProject) {
-      if (archiveProject.subtreeEnd + 1 < state.doc.lines) {
-        const pos = state.doc.line(archiveProject.subtreeEnd + 2).from;
-        changes.push({ from: pos, insert: archivedText });
-      } else {
-        const pos = state.doc.line(archiveProject.subtreeEnd + 1).to;
-        changes.push({ from: pos, insert: nl + archivedText });
-      }
-    } else {
-      const lastLine = state.doc.line(state.doc.lines);
-      const lead = lastLine.text.trim().length > 0 ? nl : '';
+    const changes: ChangeSpec[] = plan.removals.map(([start, end]) => ({
+      // A removal reaching the document end also eats the preceding newline,
+      // so no trailing blank line is left behind.
+      from: end < state.doc.lines ? state.doc.line(start + 1).from : state.doc.line(start).to,
+      to: end < state.doc.lines ? state.doc.line(end + 1).from : state.doc.line(end).to,
+      insert: '',
+    }));
+    if (plan.insertAt < state.doc.lines) {
       changes.push({
-        from: lastLine.to,
-        insert: `${lead}${nl}${archiveName}:${nl}${archivedText}`,
+        from: state.doc.line(plan.insertAt + 1).from,
+        insert: plan.insertLines.join(nl) + nl,
+      });
+    } else {
+      changes.push({
+        from: state.doc.line(state.doc.lines).to,
+        insert: nl + plan.insertLines.join(nl),
       });
     }
-
     view.editor.dispatch({ changes });
+  }
+
+  /** Quick-pick over all saved searches (global first, then the document's) and apply one. */
+  goToSearch(view: TaskPaperView): void {
+    const entries: SearchEntry[] = [
+      ...this.settings.globalSearches
+        .filter((s) => s.query.trim() !== '')
+        .map((s) => ({ name: s.name.trim() || s.query, query: s.query, global: true })),
+      ...savedSearches(outlineOf(view.editor.state)).map((s) => ({
+        name: s.name,
+        query: s.query,
+        global: false,
+      })),
+    ];
+    if (entries.length === 0) {
+      new Notice('No saved searches.');
+      return;
+    }
+    new SearchSuggestModal(this.plugin.app, entries, (entry) => {
+      view.editor.dispatch({
+        effects: setFilterEffect.of({
+          mode: 'query',
+          query: entry.query,
+          hide: this.settings.filterHidesInsteadOfDims,
+        }),
+      });
+      this.plugin.refreshSidebar();
+    }).open();
   }
 
   private applyToSelectedLines(
@@ -468,24 +469,3 @@ function selectedLineRange(state: EditorState): [number, number] {
   return [start, end];
 }
 
-function isWithin(item: Item, ancestor: Item): boolean {
-  if (item === ancestor) {
-    return true;
-  }
-  for (let a = item.parent; a; a = a.parent) {
-    if (a === ancestor) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function enclosingProjectName(item: Item, archiveName: string): string | undefined {
-  for (let a = item.parent; a; a = a.parent) {
-    if (a.kind === 'project') {
-      const name = a.displayText.trim();
-      return name === archiveName ? undefined : name;
-    }
-  }
-  return undefined;
-}

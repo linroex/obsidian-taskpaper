@@ -1,5 +1,6 @@
 import { isPastDate, parseDate } from './dates';
 import { Item, Outline } from './model';
+import { formatTag } from './tags';
 
 export interface ProjectStat {
   remaining: number;
@@ -86,4 +87,15 @@ export function savedSearches(outline: Outline): SavedSearch[] {
     out.push({ name, query, line: item.line });
   }
   return out;
+}
+
+/**
+ * Rewrite a saved-search line in place with a new name and @search(query),
+ * preserving its indentation and leading `- ` task marker (if any).
+ */
+export function rewriteSearchLine(lineText: string, name: string, query: string): string {
+  const indent = /^[\t ]*/.exec(lineText)?.[0] ?? '';
+  const body = lineText.slice(indent.length);
+  const marker = /^-(\s|$)/.test(body) ? '- ' : '';
+  return `${indent}${marker}${name} ${formatTag('search', query)}`;
 }
