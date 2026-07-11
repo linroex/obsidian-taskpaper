@@ -48,10 +48,11 @@ const continueTask: KeyBinding = {
 };
 
 /**
- * If Backspace at column `col` should un-indent instead of deleting a
- * character, return the range of indentation to remove (offsets within the
- * line); otherwise null. It triggers when only indentation — or indentation
- * plus the `- ` task marker — lies before the cursor. (Pure; testable.)
+ * If Backspace at column `col` should do outline-aware deletion instead of
+ * deleting one character, return the range to remove (offsets within the
+ * line); otherwise null. Two stages: with the `- ` task marker right before
+ * the cursor, Backspace deletes the MARKER first (task → note); with only
+ * indentation before the cursor it removes one indent level. (Pure; testable.)
  */
 export function backspaceUnindentDeletion(
   lineText: string,
@@ -63,10 +64,14 @@ export function backspaceUnindentDeletion(
     return null;
   }
   const indent = /^[\t ]*/.exec(before)?.[0] ?? '';
+  // Stage 1: the `- ` marker sits before the cursor — delete it, keep the indent.
+  if (before.length > indent.length) {
+    return { from: indent.length, to: before.length };
+  }
   if (indent.length === 0) {
     return null; // already at the left margin — let Backspace join lines
   }
-  // Remove one level: a single tab, or up to tabSize trailing spaces.
+  // Stage 2: remove one level — a single tab, or up to tabSize trailing spaces.
   if (indent.endsWith('\t')) {
     return { from: indent.length - 1, to: indent.length };
   }

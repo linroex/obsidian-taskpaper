@@ -451,17 +451,25 @@ check('url opens as-is', linkHref({ kind: 'url', text: 'https://a.com' }) === 'h
     'backspace after tab indent removes the tab',
     JSON.stringify(backspaceUnindentDeletion('\t\t- task', 2, 4)) === JSON.stringify({ from: 1, to: 2 }),
   );
+  // Stage 1: the marker before the cursor is deleted first (task → note)…
   check(
-    'backspace after indent + marker removes one level',
-    JSON.stringify(backspaceUnindentDeletion('\t- task', 3, 4)) === JSON.stringify({ from: 0, to: 1 }),
+    'backspace after indent + marker deletes the marker',
+    JSON.stringify(backspaceUnindentDeletion('\t- task', 3, 4)) === JSON.stringify({ from: 1, to: 3 }),
+    JSON.stringify(backspaceUnindentDeletion('\t- task', 3, 4)),
   );
+  check(
+    'backspace on marker without indent deletes the marker too',
+    JSON.stringify(backspaceUnindentDeletion('- task', 2, 4)) === JSON.stringify({ from: 0, to: 2 }),
+    JSON.stringify(backspaceUnindentDeletion('- task', 2, 4)),
+  );
+  // …stage 2: with only indentation left, Backspace un-indents.
   check(
     'backspace with space indent removes up to tabSize spaces',
     JSON.stringify(backspaceUnindentDeletion('      x', 6, 4)) === JSON.stringify({ from: 2, to: 6 }),
   );
   check('backspace mid-text falls through', backspaceUnindentDeletion('\t- task', 5, 4) === null);
   check('backspace at column 0 falls through', backspaceUnindentDeletion('\t- task', 0, 4) === null);
-  check('backspace with no indent falls through', backspaceUnindentDeletion('- task', 2, 4) === null);
+  check('backspace at margin with no marker falls through', backspaceUnindentDeletion('task', 0, 4) === null);
 }
 
 // --- item handles: which lines get one ---
