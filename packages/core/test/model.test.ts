@@ -200,6 +200,78 @@ check('nl last monday', iso('last monday') === '2026-07-06', String(iso('last mo
 check('nl garbage -> null', iso('blorp') === null);
 check('parseDate query use', !Number.isNaN(parseDate('next week', ref)));
 
+// --- TaskPaper 3 date syntax parity (same fixed Thu 2026-07-09 reference) ---
+// Sanity: plain `today` still resolves at LOCAL midnight.
+check('today is local midnight ts', parseDate('today', ref) === new Date(2026, 6, 9).getTime());
+check('iso date is local midnight ts', parseDate('2026-07-09', ref) === new Date(2026, 6, 9).getTime());
+
+// Times — alone (= today at that time) and combined with dates.
+check('time 9am', iso('9am') === '2026-07-09 09:00', String(iso('9am')));
+check('time 6 am (space)', iso('6 am') === '2026-07-09 06:00', String(iso('6 am')));
+check('time 3:15 pm', iso('3:15 pm') === '2026-07-09 15:15', String(iso('3:15 pm')));
+check('time 16:15 (24h)', iso('16:15') === '2026-07-09 16:15', String(iso('16:15')));
+check('time 12am is midnight -> date only', iso('12am') === '2026-07-09', String(iso('12am')));
+check('time 12pm is noon', iso('12pm') === '2026-07-09 12:00', String(iso('12pm')));
+check('tomorrow 9am', iso('tomorrow 9am') === '2026-07-10 09:00', String(iso('tomorrow 9am')));
+check('iso date + time', iso('2026-07-20 14:30') === '2026-07-20 14:30', String(iso('2026-07-20 14:30')));
+check('weekday + time', iso('next friday 8:30am') === '2026-07-10 08:30', String(iso('next friday 8:30am')));
+check('bad hour 13pm -> null', iso('13pm') === null);
+check('bad minutes 9:75 -> null', iso('9:75') === null);
+check('time ts is local', parseDate('16:15', ref) === new Date(2026, 6, 9, 16, 15).getTime());
+
+// Month names — full and 3-letter, with next/last/this and optional day.
+check('month bare = this year', iso('june') === '2026-06-01', String(iso('june')));
+check('month next (past month -> next year)', iso('next june') === '2027-06-01', String(iso('next june')));
+check('month last', iso('last june') === '2026-06-01', String(iso('last june')));
+check('month this', iso('this june') === '2026-06-01', String(iso('this june')));
+check('month next (future month -> this year)', iso('next nov') === '2026-11-01', String(iso('next nov')));
+check('month last (future month -> prev year)', iso('last nov') === '2025-11-01', String(iso('last nov')));
+check('month next of current month -> next year', iso('next july') === '2027-07-01', String(iso('next july')));
+check('month + day', iso('june 3') === '2026-06-03', String(iso('june 3')));
+check('month next + day', iso('next june 3') === '2027-06-03', String(iso('next june 3')));
+check('month abbr + day', iso('nov 26') === '2026-11-26', String(iso('nov 26')));
+check('month full name', iso('November') === '2026-11-01', String(iso('November')));
+check('month + day + time', iso('nov 26 3:15') === '2026-11-26 03:15', String(iso('nov 26 3:15')));
+
+// Year and year-month.
+check('bare year', iso('2026') === '2026-01-01', String(iso('2026')));
+check('bare year other', iso('2030') === '2030-01-01', String(iso('2030')));
+check('year-month', iso('2026-01') === '2026-01-01', String(iso('2026-01')));
+check('year-month mid', iso('2027-03') === '2027-03-01', String(iso('2027-03')));
+
+// Duration offsets / date math.
+check('today + 24h', iso('today + 24h') === '2026-07-10', String(iso('today + 24h')));
+check('today + 24h == tomorrow', parseDate('today + 24h', ref) === parseDate('tomorrow', ref));
+check('month day time +1day', iso('nov 26 3:15 +1day') === '2026-11-27 03:15', String(iso('nov 26 3:15 +1day')));
+check('bare -6 hours', iso('-6 hours') === '2026-07-08 18:00', String(iso('-6 hours')));
+check('chained 2 days 6 hours', iso('2 days 6 hours') === '2026-07-11 06:00', String(iso('2 days 6 hours')));
+check('chain inherits minus sign', iso('-2 days 6 hours') === '2026-07-06 18:00', String(iso('-2 days 6 hours')));
+check('compact +2d', iso('+2d') === '2026-07-11', String(iso('+2d')));
+check('compact 1day', iso('1day') === '2026-07-10', String(iso('1day')));
+check('compact 30m is minutes', iso('30m') === '2026-07-09 00:30', String(iso('30m')));
+check('45min', iso('45min') === '2026-07-09 00:45', String(iso('45min')));
+check('month unit calendar math', iso('today +1 month') === '2026-08-09', String(iso('today +1 month')));
+check('month math clamps eom', iso('2026-01-31 +1 month') === '2026-02-28', String(iso('2026-01-31 +1 month')));
+check('year unit', iso('today - 1 year') === '2025-07-09', String(iso('today - 1 year')));
+check('in 2 weeks still works', iso('in 2 weeks') === '2026-07-23', String(iso('in 2 weeks')));
+check('offset on iso date', iso('2026-07-01 +1 week') === '2026-07-08', String(iso('2026-07-01 +1 week')));
+check('next month = month start', iso('next month') === '2026-08-01', String(iso('next month')));
+check('last year = jan 1 prev', iso('last year') === '2025-01-01', String(iso('last year')));
+check('dangling qualifier -> null', iso('next 5') === null, String(iso('next 5')));
+check('trailing junk -> null', iso('today banana') === null, String(iso('today banana')));
+
+// Case-insensitivity.
+check('case NEXT JUNE 3', iso('NEXT JUNE 3') === '2027-06-03', String(iso('NEXT JUNE 3')));
+check('case Tomorrow 9AM', iso('Tomorrow 9AM') === '2026-07-10 09:00', String(iso('Tomorrow 9AM')));
+check('case Nov 26 3:15 PM', iso('Nov 26 3:15 PM') === '2026-11-26 15:15', String(iso('Nov 26 3:15 PM')));
+
+// Date math inside an actual query. The dueToday outline (above) has @due set
+// to the real current date, so expressions are relative to real "now".
+check('query due <= "today + 24h"', qd('@due <= "today + 24h" [d]') === 1, String(qd('@due <= "today + 24h" [d]')));
+check('query due <= "today - 24h" excludes', qd('@due <= "today - 24h" [d]') === 0);
+check('query due > "yesterday 11pm"', qd('@due > "yesterday 11pm" [d]') === 1);
+check('query due < "2 weeks"', qd('@due < "2 weeks" [d]') === 1);
+
 // --- outline operations ---
 const ol = ['A:', '\t- one', '\t- two', '\t\t- two-child', '\t- three'];
 const down = moveItemDown(ol, 1, 4); // move "- one" below "- two" (+ its child)
