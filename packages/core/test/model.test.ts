@@ -208,6 +208,14 @@ check('nl last monday', iso('last monday') === '2026-07-06', String(iso('last mo
 check('nl garbage -> null', iso('blorp') === null);
 check('parseDate query use', !Number.isNaN(parseDate('next week', ref)));
 
+// `now` = the wall-clock moment (original semantics); `today` = local midnight.
+{
+  const refNow = new Date(2026, 6, 9, 14, 30);
+  check('now keeps the time of day', parseDate('now', refNow) === refNow.getTime());
+  check('now + 2h offsets from the moment', parseDate('now + 2h', refNow) === new Date(2026, 6, 9, 16, 30).getTime());
+  check('today stays at midnight', parseDate('today', refNow) === new Date(2026, 6, 9).getTime());
+}
+
 // Invalid components are rejected, not silently normalized by Date.
 check('invalid day 2026-02-31 -> null', iso('2026-02-31') === null, String(iso('2026-02-31')));
 check('invalid month 2026-13 -> null', iso('2026-13') === null, String(iso('2026-13')));

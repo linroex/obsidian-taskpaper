@@ -223,7 +223,12 @@ function parseExpression(input: string, now: Date): Date | null {
   let matchedBase = false;
   let m: RegExpExecArray | null;
 
-  if ((m = eat(/^(today|now|tomorrow|yesterday)(?![a-z])/))) {
+  if ((m = eat(/^now(?![a-z])/))) {
+    // `now` is the wall-clock moment (original/momentjs semantics) — unlike
+    // `today`, which is local midnight. Enables `@due <= now [d]` with times.
+    cur = new Date(now.getTime());
+    matchedBase = true;
+  } else if ((m = eat(/^(today|tomorrow|yesterday)(?![a-z])/))) {
     const shift = m[1] === 'tomorrow' ? 1 : m[1] === 'yesterday' ? -1 : 0;
     cur = new Date(now.getFullYear(), now.getMonth(), now.getDate() + shift);
     matchedBase = true;
