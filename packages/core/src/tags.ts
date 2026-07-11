@@ -102,6 +102,16 @@ export function removeTag(lineText: string, name: string): string {
   return indent + body;
 }
 
+/** Strip every @tag from a line, tidying up whitespace but preserving indentation. */
+export function removeAllTags(lineText: string): string {
+  const indent = /^[\t ]*/.exec(lineText)?.[0] ?? '';
+  const body = lineText
+    .slice(indent.length)
+    .replace(/\s*@[A-Za-z0-9._-]+(?:\((?:\\.|[^)\\])*\))?/g, '')
+    .replace(/^ +| +$/g, '');
+  return indent + body;
+}
+
 /** Replace the value of an existing tag (adds it if missing). */
 export function setTagValue(lineText: string, name: string, value?: string): string {
   const tags = parseTags(lineText);
