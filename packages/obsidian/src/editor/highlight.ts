@@ -35,7 +35,11 @@ function buildDecorations(view: EditorView): DecorationSet {
           cls += ' tp-tag-overdue';
         }
       }
-      builder.add(line.from + tag.start, line.from + tag.end, Decoration.mark({ class: cls }));
+      builder.add(
+        line.from + tag.start,
+        line.from + tag.end,
+        Decoration.mark({ class: cls, attributes: { 'data-tag': tag.name } }),
+      );
     }
   }
 

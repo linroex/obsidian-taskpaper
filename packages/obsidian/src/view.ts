@@ -3,12 +3,17 @@ import { EditorState, Extension } from '@codemirror/state';
 import { drawSelection, EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { codeFolding, foldGutter, indentUnit } from '@codemirror/language';
+import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
 import { indentItem, moveItemDown, moveItemUp, outdentItem } from '@taskpaper/core';
 import { highlightPlugin } from './editor/highlight';
 import { taskpaperFolding } from './editor/folding';
 import { filterExtension, setFilterEffect } from './editor/filter';
 import { taskpaperKeymap } from './editor/keymap';
 import { applyOutlineOp } from './editor/outlineEdit';
+import { tagClickExtension } from './editor/tagClick';
+import { linkExtension, LinkKind } from './editor/links';
+import { tagAutocomplete } from './editor/tagComplete';
+import { itemHandles } from './editor/handles';
 import type TaskPaperPlugin from './main';
 
 export const VIEW_TYPE_TASKPAPER = 'taskpaper-view';
@@ -57,6 +62,37 @@ export class TaskPaperView extends TextFileView {
     this.editor?.destroy();
   }
 
+  /** Open a clicked link: http/mailto via the browser, files via the OS shell. */
+  private openLink(href: string, kind: LinkKind): void {
+    if (kind !== 'file' && kind !== 'path') {
+      window.open(href);
+      return;
+    }
+    let path = href.replace(/^file:\/\//, '');
+    if (path.startsWith('~')) {
+      const home = (globalThis as { process?: { env?: { HOME?: string } } }).process?.env?.HOME;
+      if (home) {
+        path = home + path.slice(1);
+      }
+    }
+    try {
+      // Obsidian desktop exposes Electron; shell.openPath is the safe way to
+      // open arbitrary files. Fall back to window.open elsewhere (mobile).
+      const electron = (
+        window as unknown as {
+          require?: (m: string) => { shell?: { openPath(p: string): Promise<string> } };
+        }
+      ).require?.('electron');
+      if (electron?.shell) {
+        void electron.shell.openPath(path);
+        return;
+      }
+    } catch {
+      // fall through to window.open
+    }
+    window.open(`file://${path}`);
+  }
+
   /** Persist the current editor content to disk immediately. */
   private saveNow(): void {
     if (this.editor) {
@@ -77,6 +113,32 @@ export class TaskPaperView extends TextFileView {
       taskpaperFolding,
       highlightPlugin,
       filterExtension,
+      itemHandles,
+      tagAutocomplete,
+      search({ top: true }),
+      // The search panel is user-facing UI — localize it like the rest.
+      EditorState.phrases.of({
+        Find: '尋找',
+        Replace: '取代',
+        next: '下一個',
+        previous: '上一個',
+        all: '全部',
+        'match case': '區分大小寫',
+        'by word': '整字比對',
+        regexp: '正則表達式',
+        replace: '取代',
+        'replace all': '全部取代',
+        close: '關閉',
+      }),
+      highlightSelectionMatches(),
+      tagClickExtension({
+        hide: () => this.plugin.settings.filterHidesInsteadOfDims,
+        onToggle: () => {
+          this.focusedLine = null;
+          this.plugin.refreshSidebar();
+        },
+      }),
+      linkExtension((href, kind) => this.openLink(href, kind)),
       EditorView.lineWrapping,
       keymap.of([
         {
@@ -100,6 +162,7 @@ export class TaskPaperView extends TextFileView {
           run: (v) => applyOutlineOp(v, outdentItem),
         },
         ...taskpaperKeymap,
+        ...searchKeymap,
         indentWithTab,
         ...defaultKeymap,
         ...historyKeymap,
