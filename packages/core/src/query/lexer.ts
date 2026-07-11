@@ -181,3 +181,8 @@ function isBreak(c: string): boolean {
     c === '|'
   );
 }
+
+/** Quote a value as a query string literal, escaping backslashes and quotes. */
+export function quoteQueryValue(value: string): string {
+  return `"${value.replace(/([\\"])/g, '\\$1')}"`;
+}

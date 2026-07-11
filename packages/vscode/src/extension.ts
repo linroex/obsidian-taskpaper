@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { quoteQueryValue } from '@taskpaper/core';
 import { TaskPaperFoldingProvider } from './providers/foldingProvider';
 import { TaskPaperSymbolProvider } from './providers/symbolProvider';
 import { TaskPaperCompletionProvider } from './providers/completionProvider';
@@ -46,7 +47,7 @@ export function activate(context: vscode.ExtensionContext): void {
         const query =
           value === undefined
             ? `@${name}`
-            : `@${name} contains[l] "${value.replace(/"/g, '\\"')}"`;
+            : `@${name} contains[l] ${quoteQueryValue(value)}`;
         await applyFilterQuery(editor, query);
       },
     ),

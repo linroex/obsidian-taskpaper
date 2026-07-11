@@ -1,5 +1,6 @@
 import { buildOutline } from '../src/model';
 import { runQuery } from '../src/query/evaluator';
+import { quoteQueryValue } from '../src/query/lexer';
 import { addTag, removeTag, removeAllTags, hasTag, todayStamp, toggleDoneLine } from '../src/tags';
 import { parseDate, resolveDateExpression } from '../src/dates';
 import {
@@ -417,6 +418,12 @@ check('move to non-project returns null', moveBranchToProject(mvDoc, 4, 1, 4) ==
   // The exact query the sidebar value rows run (same as the original app).
   const hits = [...runQuery('@priority contains[l] "10"', tvOutline)].map((i) => i.displayText);
   check('sidebar value query matches', hits.length === 1 && hits[0].startsWith('a'), hits.join('|'));
+  // quoteQueryValue escapes backslashes and quotes so any value round-trips.
+  check('quoteQueryValue escapes specials', quoteQueryValue('a\\b"c') === '"a\\\\b\\"c"', quoteQueryValue('a\\b"c'));
+  // In the document a literal backslash is escaped: @note(a\\b) → value 'a\b'.
+  const bsOutline = buildOutline(['P:', '\t- z @note(a\\\\b)'], 4);
+  const bsHits = [...runQuery(`@note contains[l] ${quoteQueryValue('a\\b')}`, bsOutline)];
+  check('backslash value round-trips through query', bsHits.length === 1, String(bsHits.length));
 }
 check(
   'toggleDoneLine stamps and drops @today',

@@ -4,6 +4,7 @@ import {
   focusVisibleLines,
   Item,
   projectStats,
+  quoteQueryValue,
   rewriteSearchLine,
   SavedSearch,
   savedSearches,
@@ -191,7 +192,7 @@ export class TaskPaperSidebarView extends ItemView {
       for (const value of namesToValues.get(name) ?? []) {
         const vel = tagSection.createDiv({ cls: 'tp-sb-item tp-sb-tag-value' });
         vel.createSpan({ text: value });
-        vel.onclick = () => applyQuery(`@${name} contains[l] "${value.replace(/"/g, '\\"')}"`);
+        vel.onclick = () => applyQuery(`@${name} contains[l] ${quoteQueryValue(value)}`);
       }
     }
   }
