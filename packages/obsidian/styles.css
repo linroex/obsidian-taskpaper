@@ -65,8 +65,9 @@
   caret-color: var(--text-normal);
   /* One outline level per tab = the measured width of "- " in the editor
    * font (set at runtime as --tp-indent), so a note's text lines up exactly
-   * under its parent task's title — like the original app. */
-  tab-size: var(--tp-indent, 17px);
+   * under its parent task's title — like the original app. !important beats
+   * the inline `tab-size: 4` CodeMirror writes from its tabSize facet. */
+  tab-size: var(--tp-indent, 17px) !important;
 }
 
 .taskpaper-view .cm-focused {

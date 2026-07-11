@@ -365,7 +365,7 @@ export class TaskPaperView extends TextFileView {
   /** One indent level = the rendered width of "- " in the editor font, so a
    *  note's text aligns exactly under its parent task's title (original app
    *  behavior). Measured at runtime and fed to the CSS as --tp-indent. */
-  private measureIndentUnit(): void {
+  private measureIndentUnit(attempt = 0): void {
     const probe = this.editor.contentDOM.createSpan({ text: '- ' });
     probe.style.position = 'absolute';
     probe.style.visibility = 'hidden';
@@ -374,6 +374,9 @@ export class TaskPaperView extends TextFileView {
     probe.remove();
     if (width > 0) {
       this.contentEl.style.setProperty('--tp-indent', `${width}px`);
+    } else if (attempt < 10) {
+      // Not laid out yet (view still detached) — retry on the next frame.
+      requestAnimationFrame(() => this.measureIndentUnit(attempt + 1));
     }
   }
 
