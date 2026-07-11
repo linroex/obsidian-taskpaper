@@ -16,6 +16,7 @@ import { findLinks, linkHref } from '../src/editor/links';
 import { collectTagNames, tagCompletionSource } from '../src/editor/tagComplete';
 import { backspaceUnindentDeletion, escapeClearsFilter } from '../src/editor/keymap';
 import { handleLines, planHandleDrag } from '../src/editor/handles';
+import { leadingTabs } from '../src/editor/guides';
 import {
   linesToCollapseDeepestLevel,
   linesToExpandShallowestLevel,
@@ -470,6 +471,13 @@ check('url opens as-is', linkHref({ kind: 'url', text: 'https://a.com' }) === 'h
   check('backspace mid-text falls through', backspaceUnindentDeletion('\t- task', 5, 4) === null);
   check('backspace at column 0 falls through', backspaceUnindentDeletion('\t- task', 0, 4) === null);
   check('backspace at margin with no marker falls through', backspaceUnindentDeletion('task', 0, 4) === null);
+}
+
+// --- indent guides: leading tabs per line ---
+{
+  check('leadingTabs counts tabs', leadingTabs('\t\t- x') === 2);
+  check('leadingTabs stops at first non-tab', leadingTabs('\t  \t- x') === 1);
+  check('leadingTabs zero for flush lines', leadingTabs('Project:') === 0);
 }
 
 // --- item handles: which lines get one ---

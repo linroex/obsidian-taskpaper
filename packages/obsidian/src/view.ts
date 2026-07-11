@@ -12,6 +12,7 @@ import { escapeClearsFilter, taskpaperKeymap } from './editor/keymap';
 import { applyOutlineOp } from './editor/outlineEdit';
 import { tagClickExtension } from './editor/tagClick';
 import { dashClickExtension } from './editor/dashClick';
+import { indentGuides } from './editor/guides';
 import type { SidebarSelectionItem } from './sidebarLogic';
 import { linkExtension, LinkKind } from './editor/links';
 import { tagAutocomplete } from './editor/tagComplete';
@@ -162,6 +163,7 @@ export class TaskPaperView extends TextFileView {
       foldGutter(),
       taskpaperFolding,
       highlightPlugin,
+      indentGuides,
       filterExtension,
       itemHandles({
         hide: () => this.plugin.settings.filterHidesInsteadOfDims,
