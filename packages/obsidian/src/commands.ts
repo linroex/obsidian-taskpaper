@@ -39,6 +39,7 @@ import {
 import { applyOutlineOp, dispatchOutlineEdit, docLines } from './editor/outlineEdit';
 import {
   DateModal,
+  PaletteSuggestModal,
   QueryModal,
   ProjectSuggestModal,
   SaveSearchModal,
@@ -46,6 +47,12 @@ import {
   SearchSuggestModal,
   TextPromptModal,
 } from './modals';
+import {
+  applyPaletteEntry,
+  goToAnythingEntries,
+  goToTagEntries,
+  PaletteHost,
+} from './paletteEntries';
 import type TaskPaperPlugin from './main';
 import { TaskPaperView } from './view';
 
@@ -306,6 +313,51 @@ export class TaskPaperCommands {
       });
       view.editor.focus();
     }).open();
+  }
+
+  /** One fuzzy palette over everything: projects, saved searches, tags and
+   *  their values (original Palette > Go to Anything, Cmd-P). */
+  goToAnything(view: TaskPaperView): void {
+    const entries = goToAnythingEntries(
+      outlineOf(view.editor.state),
+      this.settings.globalSearches,
+    );
+    if (entries.length === 0) {
+      new Notice('Nothing to go to.');
+      return;
+    }
+    new PaletteSuggestModal(
+      this.plugin.app,
+      entries,
+      (entry) => applyPaletteEntry(view.editor, this.paletteHost(view), entry),
+      'Go to anything',
+    ).open();
+  }
+
+  /** Fuzzy palette of tags + values only (original Palette > Go to Tag). */
+  goToTag(view: TaskPaperView): void {
+    const entries = goToTagEntries(outlineOf(view.editor.state));
+    if (entries.length === 0) {
+      new Notice('No tags in this document.');
+      return;
+    }
+    new PaletteSuggestModal(
+      this.plugin.app,
+      entries,
+      (entry) => applyPaletteEntry(view.editor, this.paletteHost(view), entry),
+      'Go to tag',
+    ).open();
+  }
+
+  /** The host applyPaletteEntry acts through — the view + plugin callbacks. */
+  private paletteHost(view: TaskPaperView): PaletteHost {
+    return {
+      hide: () => this.settings.filterHidesInsteadOfDims,
+      setFocusedLine: (line) => {
+        view.focusedLine = line;
+      },
+      refresh: () => this.plugin.refreshSidebar(),
+    };
   }
 
   moveUp(view: TaskPaperView): void {

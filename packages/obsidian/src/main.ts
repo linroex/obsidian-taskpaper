@@ -157,6 +157,8 @@ export default class TaskPaperPlugin extends Plugin {
     cmd('clear-filter', 'Clear filter', (v) => this.commands.clearFilter(v));
     cmd('go-to-project', 'Go to project…', (v) => this.commands.goToProject(v));
     cmd('go-to-search', 'Go to search…', (v) => this.commands.goToSearch(v));
+    cmd('go-to-anything', 'Go to anything…', (v) => this.commands.goToAnything(v));
+    cmd('go-to-tag', 'Go to tag…', (v) => this.commands.goToTag(v));
     cmd('fold-all', 'Fold all', (v) => this.commands.foldAll(v));
     cmd('unfold-all', 'Unfold all', (v) => this.commands.unfoldAll(v));
     cmd('collapse-items', 'Collapse items', (v) => this.commands.collapseItems(v));

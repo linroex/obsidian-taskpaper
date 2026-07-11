@@ -9,11 +9,12 @@
  */
 import { EditorState } from '@codemirror/state';
 import { CompletionContext } from '@codemirror/autocomplete';
-import { buildOutline, runQuery } from '@taskpaper/core';
+import { buildOutline, quoteQueryValue, resolveDateExpression, runQuery } from '@taskpaper/core';
 import { filterExtension, filterDecoField, setFilterEffect } from '../src/editor/filter';
 import { toggledTagFilter } from '../src/editor/tagClick';
 import { findLinks, linkHref } from '../src/editor/links';
 import { collectTagNames, tagCompletionSource } from '../src/editor/tagComplete';
+import { goToAnythingEntries, goToTagEntries } from '../src/paletteEntries';
 import { backspaceUnindentDeletion, escapeClearsFilter } from '../src/editor/keymap';
 import { handleLines, planHandleDrag } from '../src/editor/handles';
 import { guideDepths, leadingTabs } from '../src/editor/guides';
@@ -459,6 +460,169 @@ check('url opens as-is', linkHref({ kind: 'url', text: 'https://a.com' }) === 'h
   check('no completions inside an email address', email === null);
   const solStart = tagCompletionSource(new CompletionContext(EditorState.create({ doc: '@to' }), 3, false));
   check('completions at start of line still fire', solStart !== null);
+}
+
+// --- tag VALUE autocomplete: distinct values used for THAT tag in the document ---
+{
+  const doc = '- a @priority(2)\n- b @priority(1)\n- c @waiting(bob)\n- d @priority(';
+  const result = tagCompletionSource(
+    new CompletionContext(EditorState.create({ doc }), doc.length, false),
+  );
+  const labels = result?.options.map((o) => o.label) ?? [];
+  check(
+    'inside @priority( offers that tag\'s values only',
+    labels.length === 2 && labels.includes('1') && labels.includes('2') && !labels.includes('bob'),
+    labels.join(','),
+  );
+  check('value completion starts right after the paren', result?.from === doc.length);
+}
+{
+  // After a comma in a multi-value tag, values complete again.
+  const doc = '- a @priority(1)\n- b @priority(2,';
+  const result = tagCompletionSource(
+    new CompletionContext(EditorState.create({ doc }), doc.length, false),
+  );
+  check(
+    'after a comma the values complete again',
+    result !== null && result.from === doc.length && result.options.some((o) => o.label === '1'),
+  );
+}
+{
+  // A partial value replaces from its own start.
+  const doc = '- a @waiting(bob)\n- b @waiting(bo';
+  const result = tagCompletionSource(
+    new CompletionContext(EditorState.create({ doc }), doc.length, false),
+  );
+  check(
+    'a typed partial value is replaced from its start',
+    result !== null && result.from === doc.length - 2 && result.options.some((o) => o.label === 'bob'),
+    String(result?.from),
+  );
+}
+{
+  // Date tags add natural-language suggestions that insert the resolved ISO date.
+  const doc = '- x @due(';
+  const result = tagCompletionSource(
+    new CompletionContext(EditorState.create({ doc }), doc.length, false),
+  );
+  const today = result?.options.find((o) => o.label === 'today');
+  check(
+    '@due( offers natural-language dates',
+    result !== null && ['today', 'tomorrow', 'next week'].every((l) => result.options.some((o) => o.label === l)),
+  );
+  check(
+    'a date suggestion applies its resolved ISO date',
+    today !== undefined && today.apply === resolveDateExpression('today'),
+    String(today?.apply),
+  );
+}
+{
+  // Value completion never fires elsewhere: plain parens, emails, strings.
+  const plain = '- call (bo';
+  check(
+    'no value popup inside plain parentheses',
+    tagCompletionSource(new CompletionContext(EditorState.create({ doc: plain }), plain.length, false)) === null,
+  );
+  const email = '- mail user@host(x';
+  check(
+    'no value popup after an email-like @',
+    tagCompletionSource(new CompletionContext(EditorState.create({ doc: email }), email.length, false)) === null,
+  );
+  const quoted = '- say "hi (there';
+  check(
+    'no value popup inside quoted plain text',
+    tagCompletionSource(new CompletionContext(EditorState.create({ doc: quoted }), quoted.length, false)) === null,
+  );
+  // A tag with neither known values nor date suggestions stays silent.
+  const bare = '- x @flag(';
+  check(
+    'a valueless non-date tag offers nothing',
+    tagCompletionSource(new CompletionContext(EditorState.create({ doc: bare }), bare.length, false)) === null,
+  );
+}
+
+// --- palette entries: Go to anything… / Go to tag… ---
+{
+  const outline = buildOutline(
+    [
+      'Inbox:',
+      '\t- a @today',
+      '\t- b @waiting(bob)',
+      '\tSub:',
+      'Searches:',
+      '\t- Overdue @search(@due <= today)',
+    ],
+    4,
+  );
+  const globals = [
+    { name: 'Today', query: '@today and not @done' },
+    { name: 'empty', query: '   ' }, // blank query — never listed
+  ];
+  const entries = goToAnythingEntries(outline, globals);
+  const texts = entries.map((e) => e.text);
+
+  const projects = entries.filter((e) => e.kind === 'project');
+  check(
+    'anything: all projects listed with their lines',
+    projects.length === 3 &&
+      projects[0].text === 'Project: Inbox' &&
+      projects[0].kind === 'project' &&
+      projects[0].line === 0 &&
+      texts.includes('Project: Sub') &&
+      texts.includes('Project: Searches'),
+    texts.join(' | '),
+  );
+
+  const searches = entries.filter((e) => e.kind === 'search');
+  check(
+    'anything: global search first, then the document @search; blank globals dropped',
+    searches.length === 2 &&
+      searches[0].text === 'Search: Today（全域） — @today and not @done' &&
+      searches[0].kind === 'search' &&
+      searches[0].query === '@today and not @done' &&
+      searches[1].text === 'Search: Overdue — @due <= today' &&
+      searches[1].kind === 'search' &&
+      searches[1].query === '@due <= today',
+    searches.map((s) => s.text).join(' | '),
+  );
+
+  const tags = entries.filter((e) => e.kind === 'tag');
+  const waitingValue = tags.find((t) => t.text === 'Tag: @waiting(bob)');
+  check(
+    'anything: tags listed with a value row per distinct value',
+    tags.some((t) => t.text === 'Tag: @today' && t.kind === 'tag' && t.query === '@today') &&
+      waitingValue !== undefined &&
+      waitingValue.kind === 'tag' &&
+      waitingValue.query === '@waiting contains[l] "bob"',
+    tags.map((t) => t.text).join(' | '),
+  );
+  check(
+    'anything: groups keep their order (projects, searches, tags)',
+    entries.findIndex((e) => e.kind === 'project') === 0 &&
+      entries.findIndex((e) => e.kind === 'search') === projects.length &&
+      entries.findIndex((e) => e.kind === 'tag') === projects.length + searches.length,
+  );
+
+  const tagOnly = goToTagEntries(outline);
+  check(
+    'go to tag: tags + values only, unprefixed',
+    tagOnly.every((e) => e.kind === 'tag') &&
+      tagOnly.some((e) => e.text === '@waiting(bob)') &&
+      tagOnly.some((e) => e.text === '@today'),
+    tagOnly.map((t) => t.text).join(' | '),
+  );
+}
+{
+  // Value rows quote query metacharacters exactly like the sidebar.
+  const outline = buildOutline(['- a @note(say "hi")'], 4);
+  const value = goToTagEntries(outline).find((e) => e.text === '@note(say "hi")');
+  check(
+    'go to tag: value queries quote special characters',
+    value !== undefined &&
+      value.kind === 'tag' &&
+      value.query === `@note contains[l] ${quoteQueryValue('say "hi"')}`,
+    value && value.kind === 'tag' ? value.query : 'missing',
+  );
 }
 
 // --- backspace un-indents at the start of an item's text ---
