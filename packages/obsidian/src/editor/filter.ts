@@ -21,6 +21,24 @@ export type FilterSpec =
 /** Dispatch with a spec to apply a filter, or `null` to clear it. */
 export const setFilterEffect = StateEffect.define<FilterSpec | null>();
 
+/**
+ * What the searchbar should display for the active filter: the query text,
+ * a readable `project "Name"` for line-based focus, or null when no filter
+ * is active (bar hidden). (Pure; testable.)
+ */
+export function searchbarText(
+  spec: FilterSpec | null,
+  focusedProjectName: string | null,
+): string | null {
+  if (!spec) {
+    return null;
+  }
+  if (spec.mode === 'query') {
+    return spec.query;
+  }
+  return focusedProjectName ? `project "${focusedProjectName}"` : '';
+}
+
 const dimLine = Decoration.line({ class: 'tp-dim' });
 const hideBlock = Decoration.replace({ block: true });
 

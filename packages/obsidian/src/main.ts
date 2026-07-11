@@ -140,6 +140,7 @@ export default class TaskPaperPlugin extends Plugin {
     cmd('focus-out', 'Focus out', (v) => this.commands.focusOut(v));
     cmd('clear-focus', 'Clear focus / filter', (v) => this.commands.clearFocus(v));
     cmd('filter', 'Filter…', (v) => this.commands.filter(v));
+    cmd('begin-editor-search', 'Begin editor search', (v) => v.openSearchbar());
     cmd('clear-filter', 'Clear filter', (v) => this.commands.clearFilter(v));
     cmd('go-to-project', 'Go to project…', (v) => this.commands.goToProject(v));
     cmd('go-to-search', 'Go to search…', (v) => this.commands.goToSearch(v));

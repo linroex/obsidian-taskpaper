@@ -1,8 +1,63 @@
 /* TaskPaper editor styling — keyed to classes emitted by the highlight plugin. */
 
+.taskpaper-view {
+  display: flex;
+  flex-direction: column;
+}
+
 .taskpaper-view .cm-editor {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   font-family: var(--font-text);
+}
+
+/* The original app's searchbar: shown while a filter is active. */
+.tp-searchbar {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  padding: var(--size-4-1) var(--size-4-3);
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.tp-searchbar-icon {
+  display: flex;
+  color: var(--text-muted);
+}
+
+.tp-searchbar-icon svg,
+.tp-searchbar-close svg {
+  width: 14px;
+  height: 14px;
+}
+
+.tp-searchbar-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  color: var(--text-normal);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+}
+
+.tp-searchbar-input.tp-query-error {
+  color: var(--text-error);
+}
+
+.tp-searchbar-close {
+  display: flex;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-s);
+  padding: 2px;
+}
+
+.tp-searchbar-close:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
 }
 
 .taskpaper-view .cm-content {
@@ -137,27 +192,29 @@ body.taskpaper-no-strike .tp-done {
 }
 
 /* ---- Item handles (dot before items with children; hover-revealed) ---- */
-/* Vertical guide lines, one per indent level (original: guide-line-color =
- * tint mixed into the background at 10% light / 30% dark). Drawn as a 1px
- * background gradient on each leading tab — zero layout impact. */
-.tp-guide {
-  background-image: linear-gradient(
-    to right,
-    color-mix(in srgb, var(--interactive-accent) 12%, transparent) 1px,
-    transparent 1px
-  );
-  /* The line sits where the parent's handle dot hangs (half a level left of
-   * the parent text), so it descends straight from the dot. */
-  background-position-x: 8px;
+/* Vertical guide lines, one per outline level (original: guide-line-color =
+ * tint mixed into the background at 10% light / 30% dark). Drawn on the FULL
+ * line block via a repeating gradient — consecutive rows connect into one
+ * unbroken line, including blank rows inside a subtree. `--tp-guides` (the
+ * number of lines) is set per line by the indentGuides plugin. */
+.taskpaper-view {
+  --tp-guide-color: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
 }
 
-.theme-dark .tp-guide {
-  background-image: linear-gradient(
+.theme-dark .taskpaper-view {
+  --tp-guide-color: color-mix(in srgb, var(--interactive-accent) 32%, transparent);
+}
+
+.taskpaper-view .cm-line {
+  background-image: repeating-linear-gradient(
     to right,
-    color-mix(in srgb, var(--interactive-accent) 32%, transparent) 1px,
-    transparent 1px
+    var(--tp-guide-color) 0 1px,
+    transparent 1px 17px
   );
+  /* N lines, 17px apart, starting under the parent's handle dot. */
+  background-size: calc(var(--tp-guides, 0) * 17px) 100%;
   background-position-x: 8px;
+  background-repeat: no-repeat;
 }
 
 /* Zero-width: the handle must NOT shift the line's text (a 1em-wide inline

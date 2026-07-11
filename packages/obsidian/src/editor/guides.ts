@@ -1,29 +1,54 @@
 import { RangeSetBuilder } from '@codemirror/state';
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate } from '@codemirror/view';
+import { Outline } from '@taskpaper/core';
+import { outlineOf } from './outline';
 
-/** Number of leading tabs on a line — each becomes a guide column. (Pure; testable.) */
+/** Number of leading tabs on a line. (Pure; testable.) */
 export function leadingTabs(lineText: string): number {
   return /^\t*/.exec(lineText)![0].length;
 }
 
-const guideMark = Decoration.mark({ class: 'tp-guide' });
-
 /**
- * Vertical guide lines, one per outline level: every leading tab renders a
- * thin line at its left edge (via CSS background, so layout is untouched).
- * Consecutive indented lines connect into the original app's child guides.
+ * Guide-line count per document line: every parent with children draws a
+ * guide at its level through lines `P.line+1 .. P.subtreeEnd`, so the line
+ * runs unbroken through blank/whitespace rows inside the subtree.
+ * (Pure; testable.)
  */
+export function guideDepths(outline: Outline, lineCount: number): number[] {
+  const depths: number[] = new Array(lineCount).fill(0);
+  for (const item of outline.items) {
+    if (item.children.length === 0) {
+      continue;
+    }
+    const end = Math.min(item.subtreeEnd, lineCount - 1);
+    for (let ln = item.line + 1; ln <= end; ln++) {
+      depths[ln] = Math.max(depths[ln], item.level + 1);
+    }
+  }
+  return depths;
+}
+
+// One cached line decoration per depth; the CSS draws `--tp-guides` vertical
+// lines via a repeating gradient on the FULL line block, so consecutive rows
+// connect seamlessly (an inline mark's background leaves gaps between rows).
+const decoCache = new Map<number, Decoration>();
+function lineDeco(depth: number): Decoration {
+  let deco = decoCache.get(depth);
+  if (!deco) {
+    deco = Decoration.line({ attributes: { style: `--tp-guides:${depth}` } });
+    decoCache.set(depth, deco);
+  }
+  return deco;
+}
+
 function buildGuides(view: EditorView): DecorationSet {
+  const state = view.state;
+  const depths = guideDepths(outlineOf(state), state.doc.lines);
   const builder = new RangeSetBuilder<Decoration>();
-  for (const { from, to } of view.visibleRanges) {
-    let pos = from;
-    while (pos <= to) {
-      const line = view.state.doc.lineAt(pos);
-      const tabs = leadingTabs(line.text);
-      for (let i = 0; i < tabs; i++) {
-        builder.add(line.from + i, line.from + i + 1, guideMark);
-      }
-      pos = line.to + 1;
+  for (let ln = 0; ln < depths.length; ln++) {
+    if (depths[ln] > 0) {
+      const from = state.doc.line(ln + 1).from;
+      builder.add(from, from, lineDeco(depths[ln]));
     }
   }
   return builder.finish();

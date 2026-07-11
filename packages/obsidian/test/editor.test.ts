@@ -16,7 +16,7 @@ import { findLinks, linkHref } from '../src/editor/links';
 import { collectTagNames, tagCompletionSource } from '../src/editor/tagComplete';
 import { backspaceUnindentDeletion, escapeClearsFilter } from '../src/editor/keymap';
 import { handleLines, planHandleDrag } from '../src/editor/handles';
-import { leadingTabs } from '../src/editor/guides';
+import { guideDepths, leadingTabs } from '../src/editor/guides';
 import {
   linesToCollapseDeepestLevel,
   linesToExpandShallowestLevel,
@@ -473,11 +473,21 @@ check('url opens as-is', linkHref({ kind: 'url', text: 'https://a.com' }) === 'h
   check('backspace at margin with no marker falls through', backspaceUnindentDeletion('task', 0, 4) === null);
 }
 
-// --- indent guides: leading tabs per line ---
+// --- indent guides: leading tabs + per-line guide depths ---
 {
   check('leadingTabs counts tabs', leadingTabs('\t\t- x') === 2);
   check('leadingTabs stops at first non-tab', leadingTabs('\t  \t- x') === 1);
   check('leadingTabs zero for flush lines', leadingTabs('Project:') === 0);
+
+  // Guides run from each parent through its whole subtree — including blank
+  // rows inside it — and stop between root projects.
+  const gDoc = ['A:', '\t- a1', '\t\t- a2', '\t', '\t- a3', '', 'B:', '\t- b1'];
+  const depths = guideDepths(buildOutline(gDoc, 4), gDoc.length);
+  check(
+    'guide depths cover subtrees incl blank rows',
+    depths.join(',') === '0,1,2,2,1,1,0,1',
+    depths.join(','),
+  );
 }
 
 // --- item handles: which lines get one ---

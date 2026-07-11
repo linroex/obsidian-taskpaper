@@ -1,13 +1,21 @@
-import { TextFileView, WorkspaceLeaf } from 'obsidian';
+import { setIcon, TextFileView, WorkspaceLeaf } from 'obsidian';
 import { EditorState, Extension } from '@codemirror/state';
 import { drawSelection, EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { codeFolding, foldGutter, indentUnit } from '@codemirror/language';
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
-import { indentItem, moveItemDown, moveItemUp, outdentItem, todayStamp } from '@taskpaper/core';
+import {
+  indentItem,
+  moveItemDown,
+  moveItemUp,
+  outdentItem,
+  parseQuery,
+  todayStamp,
+} from '@taskpaper/core';
 import { highlightPlugin } from './editor/highlight';
+import { outlineOf } from './editor/outline';
 import { taskpaperFolding } from './editor/folding';
-import { filterExtension, setFilterEffect } from './editor/filter';
+import { filterExtension, filterSpecField, searchbarText, setFilterEffect } from './editor/filter';
 import { escapeClearsFilter, taskpaperKeymap } from './editor/keymap';
 import { applyOutlineOp } from './editor/outlineEdit';
 import { tagClickExtension } from './editor/tagClick';
@@ -29,6 +37,10 @@ export class TaskPaperView extends TextFileView {
   /** The sidebar rows currently selected (Ctrl/Cmd+click multi-selects). */
   sidebarSelection: SidebarSelectionItem[] = [];
   private applyingExternalData = false;
+  private searchbarEl!: HTMLElement;
+  private searchInput!: HTMLInputElement;
+  /** Keeps the searchbar visible with no active filter (Begin editor search). */
+  private searchbarPinned = false;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -50,6 +62,7 @@ export class TaskPaperView extends TextFileView {
   }
 
   async onOpen(): Promise<void> {
+    this.buildSearchbar();
     this.buildEditor();
     this.plugin.lastActiveView = this;
     this.plugin.refreshSidebar();
@@ -65,6 +78,96 @@ export class TaskPaperView extends TextFileView {
   async onClose(): Promise<void> {
     this.saveNow();
     this.editor?.destroy();
+  }
+
+  /** The original app's searchbar: appears when a filter is active, shows the
+   *  live query, is editable in place, and closes via Escape or the ✕. */
+  private buildSearchbar(): void {
+    this.searchbarEl = this.contentEl.createDiv({ cls: 'tp-searchbar' });
+    const icon = this.searchbarEl.createSpan({ cls: 'tp-searchbar-icon' });
+    setIcon(icon, 'search');
+    this.searchInput = this.searchbarEl.createEl('input', {
+      cls: 'tp-searchbar-input',
+      attr: { spellcheck: 'false', placeholder: '輸入查詢，例如 @today、not @done…' },
+    });
+    const close = this.searchbarEl.createSpan({ cls: 'tp-searchbar-close' });
+    setIcon(close, 'x');
+    close.onclick = () => this.closeSearchbar();
+
+    this.searchInput.addEventListener('input', () => {
+      const q = this.searchInput.value.trim();
+      try {
+        if (q) {
+          parseQuery(q);
+        }
+        this.searchInput.removeClass('tp-query-error');
+      } catch {
+        this.searchInput.addClass('tp-query-error');
+        return; // keep the previous filter while the query is invalid
+      }
+      this.focusedLine = null;
+      this.sidebarSelection = [];
+      this.editor.dispatch({
+        effects: setFilterEffect.of(
+          q
+            ? { mode: 'query', query: q, hide: this.plugin.settings.filterHidesInsteadOfDims }
+            : null,
+        ),
+      });
+      this.plugin.refreshSidebar();
+    });
+    this.searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this.closeSearchbar();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        this.editor.focus();
+      }
+    });
+    this.searchbarEl.style.display = 'none';
+  }
+
+  /** Show the searchbar (even with no filter yet) and focus its input. */
+  openSearchbar(): void {
+    this.searchbarPinned = true;
+    this.updateSearchbar();
+    this.searchInput.focus();
+    this.searchInput.select();
+  }
+
+  private closeSearchbar(): void {
+    this.searchbarPinned = false;
+    this.focusedLine = null;
+    this.sidebarSelection = [];
+    this.editor.dispatch({ effects: setFilterEffect.of(null) });
+    this.plugin.refreshSidebar();
+    this.updateSearchbar();
+    this.editor.focus();
+  }
+
+  /** Sync the searchbar with the active filter (hidden when there is none). */
+  updateSearchbar(): void {
+    if (!this.searchbarEl || !this.editor) {
+      return;
+    }
+    const spec = this.editor.state.field(filterSpecField, false) ?? null;
+    let projectName: string | null = null;
+    if (spec && spec.mode === 'focus' && this.focusedLine !== null) {
+      const item = outlineOf(this.editor.state).items.find((i) => i.line === this.focusedLine);
+      projectName = item ? item.displayText.replace(/\s*@[A-Za-z0-9._-]+(\([^)]*\))?/g, '').trim() : null;
+    }
+    const text = searchbarText(spec, projectName);
+    if (text === null && !this.searchbarPinned) {
+      this.searchbarEl.style.display = 'none';
+      return;
+    }
+    this.searchbarEl.style.display = '';
+    // Don't fight the user's own typing.
+    if (document.activeElement !== this.searchInput) {
+      this.searchInput.value = text ?? '';
+      this.searchInput.removeClass('tp-query-error');
+    }
   }
 
   /**
@@ -239,6 +342,10 @@ export class TaskPaperView extends TextFileView {
           this.data = update.state.doc.toString();
           this.requestSave();
           this.plugin.refreshSidebar();
+        }
+        // Any filter change (sidebar, tag click, commands, Escape) syncs the bar.
+        if (update.transactions.some((tr) => tr.effects.some((e) => e.is(setFilterEffect)))) {
+          this.updateSearchbar();
         }
       }),
       // LAST in the stack, so the search panel's and autocomplete's own
