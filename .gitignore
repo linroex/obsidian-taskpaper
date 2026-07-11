@@ -4,3 +4,4 @@ packages/obsidian/main.js
 packages/obsidian/out-test/
 *.vsix
 .DS_Store
+packages/core/out-test/
