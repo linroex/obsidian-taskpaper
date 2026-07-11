@@ -4,14 +4,19 @@ export interface GlobalSearch {
   query: string;
 }
 
-/** One selected sidebar row. Projects select by line; tags/searches by query. */
+/** One selected sidebar row. Projects (and hoists — Alt+click, showing only a
+ *  project's contents) select by line; tags/searches by query. */
 export type SidebarSelectionItem =
   | { kind: 'project'; line: number; name: string }
+  | { kind: 'hoist'; line: number; name: string }
   | { kind: 'tag' | 'search'; query: string };
 
 function sameSelection(a: SidebarSelectionItem, b: SidebarSelectionItem): boolean {
-  if (a.kind === 'project' || b.kind === 'project') {
-    return a.kind === 'project' && b.kind === 'project' && a.line === b.line;
+  if (a.kind === 'project' || a.kind === 'hoist') {
+    return b.kind === a.kind && a.line === b.line;
+  }
+  if (b.kind === 'project' || b.kind === 'hoist') {
+    return false;
   }
   return a.kind === b.kind && a.query === b.query;
 }
@@ -43,6 +48,8 @@ export type ComposedFilter =
   | { type: 'none' }
   /** A single project keeps the precise line-based focus mode. */
   | { type: 'focus'; line: number }
+  /** A single hoisted project: only its contents (not the project line itself). */
+  | { type: 'hoist'; line: number }
   | { type: 'query'; query: string };
 
 /**
@@ -57,14 +64,21 @@ export function composeSelection(selection: SidebarSelectionItem[]): ComposedFil
   if (selection.length === 1 && selection[0].kind === 'project') {
     return { type: 'focus', line: selection[0].line };
   }
+  if (selection.length === 1 && selection[0].kind === 'hoist') {
+    return { type: 'hoist', line: selection[0].line };
+  }
   const groups: string[] = [];
   for (const kind of ['project', 'tag', 'search'] as const) {
     const parts = selection
-      .filter((s) => s.kind === kind)
+      // A hoist mixed into a multi-selection scopes like a project — its
+      // descendants (`//*`) intersect the other kinds.
+      .filter((s) => s.kind === kind || (kind === 'project' && s.kind === 'hoist'))
       // Projects match EXACTLY by line (@id) — name matching is substring-
       // based and would confuse duplicate/prefix/unnamed projects. Stale
       // lines are validated against the outline before composing.
-      .map((s) => (s.kind === 'project' ? `(@id = ${s.line} and project)//*` : s.query));
+      .map((s) =>
+        s.kind === 'project' || s.kind === 'hoist' ? `(@id = ${s.line} and project)//*` : s.query,
+      );
     if (parts.length > 0) {
       groups.push(parts.map((p) => `(${p})`).join(' union '));
     }
@@ -73,16 +87,18 @@ export function composeSelection(selection: SidebarSelectionItem[]): ComposedFil
 }
 
 /**
- * Drop selected projects whose stored line no longer resolves to a project
- * with the same name — document edits shift lines, and a stale line would
- * focus (or query) the wrong item. `projectNameAt` maps line → cleaned
+ * Drop selected projects (and hoists) whose stored line no longer resolves to
+ * a project with the same name — document edits shift lines, and a stale line
+ * would focus (or query) the wrong item. `projectNameAt` maps line → cleaned
  * project name, or undefined when that line is not a project.
  */
 export function validateSelection(
   selection: SidebarSelectionItem[],
   projectNameAt: (line: number) => string | undefined,
 ): SidebarSelectionItem[] {
-  const valid = selection.filter((s) => s.kind !== 'project' || projectNameAt(s.line) === s.name);
+  const valid = selection.filter(
+    (s) => (s.kind !== 'project' && s.kind !== 'hoist') || projectNameAt(s.line) === s.name,
+  );
   return valid.length === selection.length ? selection : valid;
 }
 

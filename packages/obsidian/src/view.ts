@@ -137,7 +137,9 @@ export class TaskPaperView extends TextFileView {
       const item = outlineOf(this.editor.state).items.find((i) => i.line === this.focusedLine);
       projectName = item ? item.displayText.replace(/\s*@[A-Za-z0-9._-]+(\([^)]*\))?/g, '').trim() : null;
     }
-    const text = searchbarText(spec, projectName);
+    const hoisted =
+      this.sidebarSelection.length === 1 && this.sidebarSelection[0].kind === 'hoist';
+    const text = searchbarText(spec, projectName, hoisted);
     // Don't fight the user's own typing.
     if (document.activeElement !== this.searchInput) {
       this.searchInput.value = text ?? '';

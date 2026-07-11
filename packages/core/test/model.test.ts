@@ -17,6 +17,8 @@ import {
   duplicateBranch,
   deleteBranch,
   moveBranchToProject,
+  moveBranchBefore,
+  moveBranchAfter,
 } from '../src/outlineOps';
 import { expandSelectionRange, selectBranchRange } from '../src/selection';
 import { projectStats, documentCounts, rewriteSearchLine, savedSearches, tagNamesToValues } from '../src/analysis';
@@ -27,7 +29,13 @@ import {
   planArchiveDone,
   stripExtraTags,
 } from '../src/archive';
-import { focusVisibleLines, focusOutTarget, projectsToFold, toggleFocusTarget } from '../src/focus';
+import {
+  focusVisibleLines,
+  focusOutTarget,
+  hoistVisibleLines,
+  projectsToFold,
+  toggleFocusTarget,
+} from '../src/focus';
 
 let pass = 0;
 let fail = 0;
@@ -501,6 +509,54 @@ check(
 check('move into own subtree returns null', moveBranchToProject(['One:', '\tTwo:', '\t\t- x'], 0, 1, 4) === null);
 check('move to non-project returns null', moveBranchToProject(mvDoc, 4, 1, 4) === null);
 
+// --- move branch before/after (sidebar project drag-reorder) ---
+{
+  // One(0) / -a(1) / -a-child(2) / Two(3) / -b(4) / Three(5)
+  const dnd = ['One:', '\t- a', '\t\t- a-child', 'Two:', '\t- b', 'Three:'];
+  const before = moveBranchBefore(dnd, 3, 0, 4); // drag Two above One
+  check(
+    'moveBranchBefore drags a later project (with subtree) above an earlier one',
+    before !== null && before.lines.join('|') === 'Two:|\t- b|One:|\t- a|\t\t- a-child|Three:',
+    JSON.stringify(before?.lines),
+  );
+  check('moveBranchBefore cursor lands on the moved line', before !== null && before.cursorLine === 0);
+  const after = moveBranchAfter(dnd, 0, 3, 4); // drag One below Two (after its subtree)
+  check(
+    'moveBranchAfter drops the whole subtree after the target subtree',
+    after !== null && after.lines.join('|') === 'Two:|\t- b|One:|\t- a|\t\t- a-child|Three:',
+    JSON.stringify(after?.lines),
+  );
+  check('moveBranchAfter cursor lands on the moved line', after !== null && after.cursorLine === 2);
+  const afterUp = moveBranchAfter(dnd, 5, 0, 4); // drag Three up, after One's subtree
+  check(
+    'moveBranchAfter dragging up lands between the subtrees',
+    afterUp !== null && afterUp.lines.join('|') === 'One:|\t- a|\t\t- a-child|Three:|Two:|\t- b',
+    JSON.stringify(afterUp?.lines),
+  );
+  // Adjacent drops that change nothing are no-ops.
+  check('moveBranchBefore onto the next sibling is a no-op', moveBranchBefore(dnd, 0, 3, 4) === null);
+  check('moveBranchAfter onto the previous sibling is a no-op', moveBranchAfter(dnd, 3, 0, 4) === null);
+  check('moveBranchBefore onto itself is a no-op', moveBranchBefore(dnd, 0, 0, 4) === null);
+  // Nested project dragged between roots re-indents to the target's level.
+  const nested = ['Home:', '\tErrands:', '\t\t- buy', 'Work:'];
+  const outdented = moveBranchBefore(nested, 1, 3, 4); // Errands → root, before Work
+  check(
+    'moveBranchBefore re-indents a nested project to the target root level',
+    outdented !== null && outdented.lines.join('|') === 'Home:|Errands:|\t- buy|Work:',
+    JSON.stringify(outdented?.lines),
+  );
+  const indented = moveBranchBefore(['Solo:', 'Home:', '\tErrands:'], 0, 2, 4); // root → nested
+  check(
+    'moveBranchBefore re-indents a root project dropped at a nested level',
+    indented !== null && indented.lines.join('|') === 'Home:|\tSolo:|\tErrands:',
+    JSON.stringify(indented?.lines),
+  );
+  check('moveBranchBefore into own subtree returns null', moveBranchBefore(nested, 0, 1, 4) === null);
+  check('moveBranchAfter into own subtree returns null', moveBranchAfter(nested, 0, 2, 4) === null);
+  check('moveBranchBefore with a stale source line returns null', moveBranchBefore(dnd, 99, 0, 4) === null);
+  check('moveBranchBefore with a stale target line returns null', moveBranchBefore(dnd, 0, 99, 4) === null);
+}
+
 // --- removeAllTags ---
 // --- tag values map (sidebar value rows) + dash toggle ---
 {
@@ -726,6 +782,28 @@ check(
   'focusVisibleLines = subtree of Work (incl nested)',
   setEq(focusVisibleLines(focusDoc, workLine), new Set([3, 4, 5])),
   [...focusVisibleLines(focusDoc, workLine)].join(','),
+);
+// hoist = descendants + ancestors, but NOT the hoisted line itself.
+check(
+  'hoistVisibleLines(Work) shows only its contents',
+  setEq(hoistVisibleLines(focusDoc, workLine), new Set([4, 5])),
+  [...hoistVisibleLines(focusDoc, workLine)].join(','),
+);
+// Home(0) > Errands(1) > -buy(2); hoisting Errands keeps ancestor Home visible.
+const hoistDoc = buildOutline(['Home:', '\tErrands:', '\t\t- buy', 'Work:'], 4);
+check(
+  'hoistVisibleLines of a nested project = descendants + ancestors, own line hidden',
+  setEq(hoistVisibleLines(hoistDoc, 1), new Set([0, 2])),
+  [...hoistVisibleLines(hoistDoc, 1)].join(','),
+);
+check(
+  'hoistVisibleLines of a childless project is just its ancestors',
+  setEq(hoistVisibleLines(hoistDoc, 3), new Set([])),
+  [...hoistVisibleLines(hoistDoc, 3)].join(','),
+);
+check(
+  'hoistVisibleLines of a missing line is empty',
+  hoistVisibleLines(buildOutline([], 4), 5).size === 0,
 );
 check(
   'projectsToFold(Inbox) folds Work only',

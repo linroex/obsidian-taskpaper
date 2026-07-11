@@ -297,6 +297,79 @@ export function moveBranchToProject(
   return { lines: out, cursorLine: insertAt };
 }
 
+/**
+ * Move the branch at `sourceLine` so it sits either directly BEFORE the item
+ * at `targetLine` or directly AFTER that item's subtree, re-indented to the
+ * target's level (so dragging a nested project between roots keeps the
+ * outline valid). Returns null when either line resolves to no item, the
+ * target lies inside the branch being moved, or the move is a no-op.
+ */
+function moveBranchNear(
+  lines: string[],
+  sourceLine: number,
+  targetLine: number,
+  tabSize: number,
+  after: boolean,
+): OutlineEdit | null {
+  const outline = buildOutline(lines, tabSize);
+  const item = outline.items.find((i) => i.line === sourceLine);
+  const target = outline.items.find((i) => i.line === targetLine);
+  if (!item || !target || item === target) {
+    return null;
+  }
+  if (target.line >= item.line && target.line <= item.subtreeEnd) {
+    return null; // cannot move a branch around a target inside itself
+  }
+  // Re-indent the block to the target's ACTUAL leading whitespace (its
+  // structural level can differ under mixed/extra indentation).
+  const baseIndent = /^[\t ]*/.exec(lines[target.line])?.[0] ?? '';
+  const byLine = new Map(
+    outline.items
+      .filter((i) => i.line >= item.line && i.line <= item.subtreeEnd)
+      .map((i) => [i.line, i] as const),
+  );
+  const block: string[] = [];
+  for (let ln = item.line; ln <= item.subtreeEnd; ln++) {
+    const it = byLine.get(ln);
+    block.push(it ? baseIndent + '\t'.repeat(it.level - item.level) + it.text : lines[ln]);
+  }
+  const out = lines.slice();
+  out.splice(item.line, block.length);
+  // Insertion point in ORIGINAL coordinates; shift up when the removed block
+  // sits before it.
+  let insertAt = after ? target.subtreeEnd + 1 : target.line;
+  if (item.line < insertAt) {
+    insertAt -= block.length;
+  }
+  out.splice(insertAt, 0, ...block);
+  // Adjacent drops (before the next sibling / after the previous one) with no
+  // re-indent change the document not at all — report a no-op.
+  if (out.length === lines.length && out.every((l, i) => l === lines[i])) {
+    return null;
+  }
+  return { lines: out, cursorLine: insertAt };
+}
+
+/** Move the branch at `sourceLine` to directly before the item at `targetLine`. */
+export function moveBranchBefore(
+  lines: string[],
+  sourceLine: number,
+  targetLine: number,
+  tabSize: number,
+): OutlineEdit | null {
+  return moveBranchNear(lines, sourceLine, targetLine, tabSize, false);
+}
+
+/** Move the branch at `sourceLine` to directly after the subtree of the item at `targetLine`. */
+export function moveBranchAfter(
+  lines: string[],
+  sourceLine: number,
+  targetLine: number,
+  tabSize: number,
+): OutlineEdit | null {
+  return moveBranchNear(lines, sourceLine, targetLine, tabSize, true);
+}
+
 /** Outdent an item and its subtree one level (remove one tab, or up to tabSize spaces). */
 export function outdentItem(lines: string[], line: number, tabSize: number): OutlineEdit | null {
   const { item } = itemAt(lines, line, tabSize);

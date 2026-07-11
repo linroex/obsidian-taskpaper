@@ -8,7 +8,7 @@ import {
   WidgetType,
 } from '@codemirror/view';
 import { foldEffect, unfoldEffect } from '@codemirror/language';
-import { buildOutline, focusVisibleLines, Outline } from '@taskpaper/core';
+import { buildOutline, focusVisibleLines, moveBranchToProject, Outline } from '@taskpaper/core';
 import { setFilterEffect } from './filter';
 import { foldedRangeAtLine, subtreeFoldRange } from './folding';
 import { outlineOf, visibleItems } from './outline';
@@ -152,10 +152,15 @@ function docLines(view: EditorView): string[] {
   return lines;
 }
 
+/** CSS class marking the sidebar project row hovered during a handle drag. */
+export const SIDEBAR_DROP_CLASS = 'tp-sb-drop-into';
+
 /**
  * A live drag session started from a handle. Tracks the pointer, shows a drop
  * indicator, and on mouseup either commits the move (real drag) or reports a
- * plain click. Escape cancels the whole gesture.
+ * plain click. Dragging over a sidebar project row (original TaskPaper 3:
+ * drag items onto sidebar projects) highlights it and drops the branch INTO
+ * that project. Escape cancels the whole gesture.
  */
 class HandleDrag {
   private indicator: HTMLElement | null = null;
@@ -167,6 +172,8 @@ class HandleDrag {
    *  committed while the document is still identical (edits between the last
    *  mousemove and mouseup would otherwise be overwritten). */
   private planDoc: Text;
+  /** The sidebar project row currently hovered (drop target), if any. */
+  private sidebarTarget: HTMLElement | null = null;
 
   private readonly onMove = (e: MouseEvent) => this.update(e);
   private readonly onUp = () => this.finish(true);
@@ -184,6 +191,9 @@ class HandleDrag {
     startEvent: MouseEvent,
     /** Called once when the gesture ends without having dragged (= a click). */
     private onClick: () => void,
+    /** Hit-test hook (injectable for tests — jsdom's elementFromPoint returns null). */
+    private hitTest: (x: number, y: number) => Element | null = (x, y) =>
+      document.elementFromPoint(x, y),
   ) {
     this.startY = startEvent.clientY;
     this.planDoc = view.state.doc;
@@ -204,11 +214,30 @@ class HandleDrag {
     if (!this.moved) {
       return;
     }
+    // Outside the editor the pointer may sit on a sidebar project row — then
+    // the row is the drop target and the in-editor indicator hides.
+    const hit = this.hitTest(e.clientX, e.clientY);
+    const row = (hit?.closest?.('.tp-sb-project') as HTMLElement | null) ?? null;
+    this.setSidebarTarget(row);
+    if (row) {
+      this.plan = null;
+      this.drawIndicator();
+      return;
+    }
     const pos = this.view.posAtCoords({ x: e.clientX, y: e.clientY }, false);
     const hoverLine = this.view.state.doc.lineAt(pos).number - 1;
     this.plan = planHandleDrag(docLines(this.view), this.itemLine, hoverLine, 4);
     this.planDoc = this.view.state.doc;
     this.drawIndicator();
+  }
+
+  private setSidebarTarget(row: HTMLElement | null): void {
+    if (this.sidebarTarget === row) {
+      return;
+    }
+    this.sidebarTarget?.classList.remove(SIDEBAR_DROP_CLASS);
+    this.sidebarTarget = row;
+    row?.classList.add(SIDEBAR_DROP_CLASS);
   }
 
   private drawIndicator(): void {
@@ -244,6 +273,8 @@ class HandleDrag {
     window.removeEventListener('keydown', this.onKey, true);
     this.indicator?.remove();
     this.indicator = null;
+    const target = this.sidebarTarget;
+    this.setSidebarTarget(null);
     if (!commit) {
       return; // cancelled with Escape — the following mouseup is inert
     }
@@ -251,19 +282,37 @@ class HandleDrag {
       this.onClick();
       return;
     }
-    if (this.plan && this.view.state.doc.eq(this.planDoc)) {
-      const state = this.view.state;
-      const br = state.lineBreak;
-      let anchor = 0;
-      for (let i = 0; i < this.plan.cursorLine; i++) {
-        anchor += this.plan.lines[i].length + br.length;
+    if (target) {
+      // Dropped on a sidebar project row: move the branch INTO that project.
+      // Computed fresh from the current document, so no staleness guard needed.
+      const projectLine = Number(target.getAttribute('data-line'));
+      if (Number.isNaN(projectLine)) {
+        return;
       }
-      this.view.dispatch({
-        changes: { from: 0, to: state.doc.length, insert: this.plan.lines.join(br) },
-        selection: { anchor },
-        scrollIntoView: true,
-      });
+      const edit = moveBranchToProject(docLines(this.view), this.itemLine, projectLine, 4);
+      if (edit) {
+        this.commitLines(edit.lines, edit.cursorLine);
+      }
+      return;
     }
+    if (this.plan && this.view.state.doc.eq(this.planDoc)) {
+      this.commitLines(this.plan.lines, this.plan.cursorLine);
+    }
+  }
+
+  /** Replace the whole document with `lines`, cursor at the start of `cursorLine`. */
+  private commitLines(lines: string[], cursorLine: number): void {
+    const state = this.view.state;
+    const br = state.lineBreak;
+    let anchor = 0;
+    for (let i = 0; i < cursorLine; i++) {
+      anchor += lines[i].length + br.length;
+    }
+    this.view.dispatch({
+      changes: { from: 0, to: state.doc.length, insert: lines.join(br) },
+      selection: { anchor },
+      scrollIntoView: true,
+    });
   }
 }
 
@@ -272,6 +321,9 @@ export interface HandleOptions {
   hide(): boolean;
   /** Called after Alt-clicking a project's handle focused it. */
   onFocus(line: number): void;
+  /** Hit-test hook for drags over the sidebar (injectable for tests;
+   *  defaults to document.elementFromPoint, which jsdom cannot provide). */
+  elementFromPoint?(x: number, y: number): Element | null;
 }
 
 /**
@@ -334,7 +386,13 @@ export function itemHandles(opts: HandleOptions) {
           }
           event.preventDefault();
           this.activeDrag?.cancel();
-          this.activeDrag = new HandleDrag(view, line, event, () => toggleHandleFold(view, line));
+          this.activeDrag = new HandleDrag(
+            view,
+            line,
+            event,
+            () => toggleHandleFold(view, line),
+            opts.elementFromPoint,
+          );
           return true;
         },
       },
