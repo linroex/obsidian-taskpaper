@@ -258,8 +258,12 @@ export class TaskPaperSidebarView extends ItemView {
             return;
           }
           const line = doc.line(search.line + 1);
-          const to = search.line + 1 < doc.lines ? doc.line(search.line + 2).from : line.to;
-          view.editor.dispatch({ changes: { from: line.from, to, insert: '' } });
+          const isLast = search.line + 1 >= doc.lines;
+          // Deleting the last line eats the PRECEDING newline instead of the
+          // (nonexistent) following one, so no empty trailing line remains.
+          const from = isLast && search.line > 0 ? doc.line(search.line).to : line.from;
+          const to = isLast ? line.to : doc.line(search.line + 2).from;
+          view.editor.dispatch({ changes: { from, to, insert: '' } });
         }),
     );
     menu.showAtMouseEvent(e);
