@@ -140,7 +140,8 @@ check('signature changes when file changes', sidebarSignature('a.taskpaper', 100
   check('included tag shown with count 0', due !== undefined && due[1] === 0);
   check('included tag found in doc keeps its count', withInclude.find(([n]) => n === 'today')?.[1] === 2);
   check('exclude wins over include', visibleTagCounts(found, ['search'], ['search']).length === 2);
-  check('sorted by count desc then name', withInclude.map(([n]) => n).join(',') === 'done,today,due');
+  // Alphabetical order, matching the original macOS sidebar.
+  check('sorted alphabetically', withInclude.map(([n]) => n).join(',') === 'done,due,today');
 }
 
 // --- tag click: toggling the filter ---

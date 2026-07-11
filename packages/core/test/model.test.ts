@@ -1,6 +1,6 @@
 import { buildOutline } from '../src/model';
 import { runQuery } from '../src/query/evaluator';
-import { addTag, removeTag, removeAllTags, hasTag, todayStamp } from '../src/tags';
+import { addTag, removeTag, removeAllTags, hasTag, todayStamp, toggleDoneLine } from '../src/tags';
 import { parseDate, resolveDateExpression } from '../src/dates';
 import {
   moveItemUp,
@@ -13,7 +13,7 @@ import {
   deleteBranch,
   moveBranchToProject,
 } from '../src/outlineOps';
-import { projectStats, documentCounts, rewriteSearchLine, savedSearches } from '../src/analysis';
+import { projectStats, documentCounts, rewriteSearchLine, savedSearches, tagNamesToValues } from '../src/analysis';
 import {
   ancestorProjectPath,
   applyArchivePlan,
@@ -401,6 +401,30 @@ check('move into own subtree returns null', moveBranchToProject(['One:', '\tTwo:
 check('move to non-project returns null', moveBranchToProject(mvDoc, 4, 1, 4) === null);
 
 // --- removeAllTags ---
+// --- tag values map (sidebar value rows) + dash toggle ---
+{
+  const tvOutline = buildOutline(
+    ['P:', '\t- a @priority(10)', '\t- b @priority(1,2)', '\t- c @flag', '\t- d @priority(2)'],
+    4,
+  );
+  const tv = tagNamesToValues(tvOutline);
+  check(
+    'tagNamesToValues splits commas and dedupes',
+    (tv.get('priority') ?? []).join(',') === '1,10,2',
+    (tv.get('priority') ?? []).join(','),
+  );
+  check('valueless tag yields empty list', (tv.get('flag') ?? ['x']).length === 0);
+  // The exact query the sidebar value rows run (same as the original app).
+  const hits = [...runQuery('@priority contains[l] "10"', tvOutline)].map((i) => i.displayText);
+  check('sidebar value query matches', hits.length === 1 && hits[0].startsWith('a'), hits.join('|'));
+}
+check(
+  'toggleDoneLine stamps and drops @today',
+  toggleDoneLine('\t- x @today', '2026-07-11') === '\t- x @done(2026-07-11)',
+  toggleDoneLine('\t- x @today', '2026-07-11'),
+);
+check('toggleDoneLine removes when done', toggleDoneLine('\t- x @done(2026-07-11)', '2026-07-11') === '\t- x');
+
 check('removeAllTags strips every tag', removeAllTags('- foo @today @flag') === '- foo');
 check(
   'removeAllTags handles values and keeps indent',

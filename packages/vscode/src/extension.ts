@@ -40,10 +40,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
     vscode.commands.registerCommand(
       'taskpaper.filterTag',
-      async (uri: vscode.Uri, name: string) => {
+      async (uri: vscode.Uri, name: string, value?: string) => {
         const doc = await vscode.workspace.openTextDocument(uri);
         const editor = await vscode.window.showTextDocument(doc, { preserveFocus: true });
-        await applyFilterQuery(editor, `@${name}`);
+        const query =
+          value === undefined
+            ? `@${name}`
+            : `@${name} contains[l] "${value.replace(/"/g, '\\"')}"`;
+        await applyFilterQuery(editor, query);
       },
     ),
 

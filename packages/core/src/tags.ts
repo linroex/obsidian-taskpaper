@@ -112,6 +112,13 @@ export function removeAllTags(lineText: string): string {
   return indent + body;
 }
 
+/** Toggle @done on a line: remove it if present, else stamp it (dropping @today). */
+export function toggleDoneLine(lineText: string, stamp: string): string {
+  return hasTag(lineText, 'done')
+    ? removeTag(lineText, 'done')
+    : addTag(removeTag(lineText, 'today'), 'done', stamp);
+}
+
 /** Replace the value of an existing tag (adds it if missing). */
 export function setTagValue(lineText: string, name: string, value?: string): string {
   const tags = parseTags(lineText);

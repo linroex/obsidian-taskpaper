@@ -4,13 +4,14 @@ import { drawSelection, EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { codeFolding, foldGutter, indentUnit } from '@codemirror/language';
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
-import { indentItem, moveItemDown, moveItemUp, outdentItem } from '@taskpaper/core';
+import { indentItem, moveItemDown, moveItemUp, outdentItem, todayStamp } from '@taskpaper/core';
 import { highlightPlugin } from './editor/highlight';
 import { taskpaperFolding } from './editor/folding';
 import { filterExtension, setFilterEffect } from './editor/filter';
 import { escapeClearsFilter, taskpaperKeymap } from './editor/keymap';
 import { applyOutlineOp } from './editor/outlineEdit';
 import { tagClickExtension } from './editor/tagClick';
+import { dashClickExtension } from './editor/dashClick';
 import { linkExtension, LinkKind } from './editor/links';
 import { tagAutocomplete } from './editor/tagComplete';
 import { itemHandles } from './editor/handles';
@@ -189,6 +190,9 @@ export class TaskPaperView extends TextFileView {
           this.focusedLine = null;
           this.plugin.refreshSidebar();
         },
+      }),
+      dashClickExtension({
+        stamp: () => todayStamp(this.plugin.settings.doneIncludesTime),
       }),
       linkExtension((href, kind) => this.openLink(href, kind)),
       EditorView.lineWrapping,

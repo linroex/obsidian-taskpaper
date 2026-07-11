@@ -60,6 +60,16 @@ body.taskpaper-no-strike .tp-done {
   color: var(--text-muted);
 }
 
+/* The task's leading dash is a button: clicking it toggles @done. */
+.tp-task-dash {
+  cursor: pointer;
+}
+
+.tp-task-dash:hover {
+  color: var(--text-accent);
+  font-weight: 700;
+}
+
 /* Tags — clickable: click filters by the tag, clicking it again clears. */
 .tp-tag {
   color: var(--text-accent);
@@ -302,6 +312,13 @@ body.taskpaper-no-strike .tp-done {
 .taskpaper-sidebar .tp-sb-tag-count {
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
+}
+
+/* Tag value child rows (original sidebar lists each value under its tag). */
+.taskpaper-sidebar .tp-sb-tag-value {
+  padding-left: 26px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
 }
 
 .taskpaper-sidebar .tp-sb-empty {

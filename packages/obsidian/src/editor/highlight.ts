@@ -23,6 +23,19 @@ function buildDecorations(view: EditorView): DecorationSet {
       builder.add(line.from, line.from, noteLine);
     }
 
+    // The task's leading dash is a button: clicking it toggles @done
+    // (original TaskPaper attaches button://toggledone to this run).
+    if (item.kind === 'task') {
+      const indent = /^[\t ]*/.exec(line.text)?.[0].length ?? 0;
+      if (line.text[indent] === '-') {
+        builder.add(
+          line.from + indent,
+          line.from + indent + 1,
+          Decoration.mark({ class: 'tp-task-dash' }),
+        );
+      }
+    }
+
     for (const tag of parseTags(line.text)) {
       let cls = 'tp-tag';
       if (tag.name === 'done') {

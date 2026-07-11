@@ -1,12 +1,13 @@
 import * as vscode from 'vscode';
-import { projectStats, savedSearches } from '@taskpaper/core';
+import { projectStats, savedSearches, tagNamesToValues } from '@taskpaper/core';
 import { getOutline, tabSizeFor } from '../outline';
 
 type Node =
   | { kind: 'section'; id: 'searches' | 'projects' | 'tags'; label: string }
   | { kind: 'search'; name: string; query: string; uri: vscode.Uri }
   | { kind: 'project'; label: string; remaining: number; line: number; uri: vscode.Uri }
-  | { kind: 'tag'; name: string; count: number; uri: vscode.Uri };
+  | { kind: 'tag'; name: string; count: number; values: string[]; uri: vscode.Uri }
+  | { kind: 'tag-value'; name: string; value: string; uri: vscode.Uri };
 
 /** Tree view listing the active document's projects and tags for quick navigation/filtering. */
 export class TaskPaperTreeProvider implements vscode.TreeDataProvider<Node> {
@@ -91,15 +92,31 @@ export class TaskPaperTreeProvider implements vscode.TreeDataProvider<Node> {
       };
       return item;
     }
-    // tag
-    const item = new vscode.TreeItem(`@${node.name}`, vscode.TreeItemCollapsibleState.None);
-    item.description = String(node.count);
-    item.iconPath = new vscode.ThemeIcon('tag');
-    item.tooltip = `Filter by @${node.name}`;
+    if (node.kind === 'tag') {
+      const item = new vscode.TreeItem(
+        `@${node.name}`,
+        node.values.length > 0
+          ? vscode.TreeItemCollapsibleState.Collapsed
+          : vscode.TreeItemCollapsibleState.None,
+      );
+      item.description = String(node.count);
+      item.iconPath = new vscode.ThemeIcon('tag');
+      item.tooltip = `Filter by @${node.name}`;
+      item.command = {
+        command: 'taskpaper.filterTag',
+        title: 'Filter by tag',
+        arguments: [node.uri, node.name],
+      };
+      return item;
+    }
+    // tag value — clicking filters by tag + value (original sidebar rows).
+    const item = new vscode.TreeItem(node.value, vscode.TreeItemCollapsibleState.None);
+    item.iconPath = new vscode.ThemeIcon('symbol-constant');
+    item.tooltip = `Filter by @${node.name} contains[l] "${node.value}"`;
     item.command = {
       command: 'taskpaper.filterTag',
-      title: 'Filter by tag',
-      arguments: [node.uri, node.name],
+      title: 'Filter by tag value',
+      arguments: [node.uri, node.name, node.value],
     };
     return item;
   }
@@ -119,6 +136,14 @@ export class TaskPaperTreeProvider implements vscode.TreeDataProvider<Node> {
       sections.push({ kind: 'section', id: 'projects', label: 'Projects' });
       sections.push({ kind: 'section', id: 'tags', label: 'Tags' });
       return sections;
+    }
+    if (element.kind === 'tag') {
+      return element.values.map((value) => ({
+        kind: 'tag-value' as const,
+        name: element.name,
+        value,
+        uri: element.uri,
+      }));
     }
     if (element.kind !== 'section') {
       return [];
@@ -146,15 +171,22 @@ export class TaskPaperTreeProvider implements vscode.TreeDataProvider<Node> {
         }));
     }
 
-    // tags with counts
+    // tags with counts + their distinct values (alphabetical, like the original)
     const counts = new Map<string, number>();
     for (const item of outline.items) {
       for (const name of item.tags.keys()) {
         counts.set(name, (counts.get(name) ?? 0) + 1);
       }
     }
+    const namesToValues = tagNamesToValues(outline);
     return [...counts.entries()]
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .map(([name, count]) => ({ kind: 'tag' as const, name, count, uri: doc.uri }));
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([name, count]) => ({
+        kind: 'tag' as const,
+        name,
+        count,
+        values: namesToValues.get(name) ?? [],
+        uri: doc.uri,
+      }));
   }
 }

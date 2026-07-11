@@ -60,7 +60,7 @@ export function parseTagList(raw: string): string[] {
  * Applies the include/exclude tag settings to the tag counts found in the
  * document: excluded tags are never shown (even when included), and included
  * tags are always shown — with a count of 0 when absent from the document.
- * Sorted by count descending, then name.
+ * Sorted alphabetically, matching the original app's sidebar.
  */
 export function visibleTagCounts(
   found: Map<string, number>,
@@ -77,5 +77,5 @@ export function visibleTagCounts(
   for (const name of exclude) {
     merged.delete(name);
   }
-  return [...merged.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  return [...merged.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 }

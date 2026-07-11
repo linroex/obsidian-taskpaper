@@ -7,6 +7,7 @@ import {
   rewriteSearchLine,
   SavedSearch,
   savedSearches,
+  tagNamesToValues,
   toggleFocusTarget,
 } from '@taskpaper/core';
 import { outlineOf } from './editor/outline';
@@ -167,22 +168,31 @@ export class TaskPaperSidebarView extends ItemView {
     if (sorted.length === 0) {
       tagSection.createDiv({ cls: 'tp-sb-empty', text: '（無標籤）' });
     }
+    const applyQuery = (query: string) => {
+      view.focusedLine = null;
+      view.editor.dispatch({
+        effects: setFilterEffect.of({
+          mode: 'query',
+          query,
+          hide: this.plugin.settings.filterHidesInsteadOfDims,
+        }),
+      });
+      this.app.workspace.revealLeaf(view.leaf);
+      this.plugin.refreshSidebar();
+    };
+    const namesToValues = tagNamesToValues(outline);
     for (const [name, count] of sorted) {
       const el = tagSection.createDiv({ cls: 'tp-sb-item tp-sb-tag' });
       el.createSpan({ cls: 'tp-sb-tag-name', text: `@${name}` });
       el.createSpan({ cls: 'tp-sb-tag-count', text: String(count) });
-      el.onclick = () => {
-        view.focusedLine = null;
-        view.editor.dispatch({
-          effects: setFilterEffect.of({
-            mode: 'query',
-            query: `@${name}`,
-            hide: this.plugin.settings.filterHidesInsteadOfDims,
-          }),
-        });
-        this.app.workspace.revealLeaf(view.leaf);
-        this.plugin.refreshSidebar();
-      };
+      el.onclick = () => applyQuery(`@${name}`);
+      // Each distinct value is a child row (original sidebar); clicking it
+      // filters with `@tag contains[l] "value"` — exactly the original query.
+      for (const value of namesToValues.get(name) ?? []) {
+        const vel = tagSection.createDiv({ cls: 'tp-sb-item tp-sb-tag-value' });
+        vel.createSpan({ text: value });
+        vel.onclick = () => applyQuery(`@${name} contains[l] "${value.replace(/"/g, '\\"')}"`);
+      }
     }
   }
 

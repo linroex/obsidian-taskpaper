@@ -68,6 +68,35 @@ export function documentCounts(outline: Outline, now: Date = new Date()): Docume
   return counts;
 }
 
+/**
+ * Distinct values per tag name across the outline — the original sidebar
+ * lists each value as a child row under its tag. Multi-values are split on
+ * commas (`@priority(1,2)` yields '1' and '2'); values sort alphabetically.
+ */
+export function tagNamesToValues(outline: Outline): Map<string, string[]> {
+  const sets = new Map<string, Set<string>>();
+  for (const item of outline.items) {
+    for (const [name, value] of item.tags) {
+      let set = sets.get(name);
+      if (!set) {
+        set = new Set();
+        sets.set(name, set);
+      }
+      for (const part of (value ?? '').split(',')) {
+        const v = part.trim();
+        if (v) {
+          set.add(v);
+        }
+      }
+    }
+  }
+  const out = new Map<string, string[]>();
+  for (const [name, set] of sets) {
+    out.set(name, [...set].sort((a, b) => a.localeCompare(b)));
+  }
+  return out;
+}
+
 export interface SavedSearch {
   name: string;
   query: string;

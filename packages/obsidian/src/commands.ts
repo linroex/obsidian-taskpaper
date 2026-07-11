@@ -22,6 +22,7 @@ import {
   planArchiveDone,
   removeAllTags,
   removeTag,
+  toggleDoneLine,
   savedSearches,
   setLineKind,
   setTagValue,
@@ -57,11 +58,7 @@ export class TaskPaperCommands {
 
   toggleDone(view: TaskPaperView): void {
     const stamp = todayStamp(this.settings.doneIncludesTime);
-    this.applyToSelectedLines(view.editor, (text) =>
-      hasTag(text, 'done')
-        ? removeTag(text, 'done')
-        : addTag(removeTag(text, 'today'), 'done', stamp),
-    );
+    this.applyToSelectedLines(view.editor, (text) => toggleDoneLine(text, stamp));
   }
 
   toggleToday(view: TaskPaperView): void {
