@@ -291,14 +291,31 @@ body.taskpaper-no-strike .tp-done {
   font-weight: 600;
 }
 
-.taskpaper-sidebar .tp-sb-project.is-focused {
+/* The active row — focused project, or the tag/search whose filter is on. */
+.taskpaper-sidebar .tp-sb-item.is-focused {
   background-color: var(--interactive-accent);
   color: var(--text-on-accent);
 }
 
-.taskpaper-sidebar .tp-sb-project.is-focused .tp-sb-count {
+.taskpaper-sidebar .tp-sb-item.is-focused .tp-sb-count {
   background: var(--text-on-accent);
   color: var(--interactive-accent);
+}
+
+/* Inner spans carry their own colors — override them on the accent background. */
+.taskpaper-sidebar .tp-sb-item.is-focused .tp-sb-tag-name,
+.taskpaper-sidebar .tp-sb-item.is-focused .tp-sb-tag-count,
+.taskpaper-sidebar .tp-sb-item.is-focused .tp-sb-search-name {
+  color: var(--text-on-accent);
+}
+
+.taskpaper-sidebar .tp-sb-search-global.is-focused .tp-sb-global-badge {
+  background: var(--text-on-accent);
+  color: var(--interactive-accent);
+}
+
+.taskpaper-sidebar .tp-sb-tag-value.is-focused {
+  color: var(--text-on-accent);
 }
 
 .taskpaper-sidebar .tp-sb-clear:disabled {
