@@ -243,31 +243,28 @@ export class TaskPaperCommands {
     this.plugin.refreshSidebar();
   }
 
+  /** Focus the nearest enclosing project of the cursor — same hide-filter
+   *  semantics as clicking the project in the sidebar (original: Focus In). */
   focus(view: TaskPaperView): void {
     const state = view.editor.state;
     const outline = outlineOf(state);
     const curLine = state.doc.lineAt(state.selection.main.head).number - 1;
-    const current = itemAtLine(outline, curLine);
+    let current = itemAtLine(outline, curLine);
+    while (current && current.kind !== 'project') {
+      current = current.parent ?? undefined;
+    }
     if (!current) {
       return;
     }
-    let root = current;
-    while (root.parent) {
-      root = root.parent;
-    }
-    unfoldAll(view.editor);
-    const effects = [];
-    for (const r of outline.roots) {
-      if (r === root || r.subtreeEnd <= r.line) {
-        continue;
-      }
-      const from = state.doc.line(r.line + 1).to;
-      const to = state.doc.line(r.subtreeEnd + 1).to;
-      effects.push(foldEffect.of({ from, to }));
-    }
-    if (effects.length > 0) {
-      view.editor.dispatch({ effects });
-    }
+    view.focusedLine = current.line;
+    view.editor.dispatch({
+      effects: setFilterEffect.of({
+        mode: 'focus',
+        visible: focusVisibleLines(outline, current.line),
+        hide: this.settings.filterHidesInsteadOfDims,
+      }),
+    });
+    this.plugin.refreshSidebar();
   }
 
   clearFocus(view: TaskPaperView): void {
