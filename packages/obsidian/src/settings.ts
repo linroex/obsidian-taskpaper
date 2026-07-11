@@ -5,6 +5,10 @@ import type TaskPaperPlugin from './main';
 export interface TaskPaperSettings {
   doneIncludesTime: boolean;
   archiveProjectName: string;
+  /** Record each archived item's original project path as @project(...) (TaskPaper's "Add project tag when archiving"). */
+  addProjectTagWhenArchiving: boolean;
+  /** Strip all tags except @done and @project from archived lines (TaskPaper's "Remove extra tags when archiving"). */
+  removeExtraTagsWhenArchiving: boolean;
   strikeDoneItems: boolean;
   filterHidesInsteadOfDims: boolean;
   /** Saved searches shown in the sidebar for every document (TaskPaper's searches.taskpaper). */
@@ -18,6 +22,8 @@ export interface TaskPaperSettings {
 export const DEFAULT_SETTINGS: TaskPaperSettings = {
   doneIncludesTime: false,
   archiveProjectName: 'Archive',
+  addProjectTagWhenArchiving: true,
+  removeExtraTagsWhenArchiving: false,
   strikeDoneItems: true,
   filterHidesInsteadOfDims: true,
   globalSearches: [
@@ -53,6 +59,26 @@ export class TaskPaperSettingTab extends PluginSettingTab {
       .addText((t) =>
         t.setValue(this.plugin.settings.archiveProjectName).onChange(async (v) => {
           this.plugin.settings.archiveProjectName = v.trim() || 'Archive';
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('封存時加上 @project 標籤')
+      .setDesc('封存時以 @project(...) 記錄項目原本所屬的完整專案路徑（例如 @project(2026 Goals / Work)）。')
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.addProjectTagWhenArchiving).onChange(async (v) => {
+          this.plugin.settings.addProjectTagWhenArchiving = v;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('封存時移除多餘標籤')
+      .setDesc('封存時移除 @done 與 @project 以外的所有標籤。')
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.removeExtraTagsWhenArchiving).onChange(async (v) => {
+          this.plugin.settings.removeExtraTagsWhenArchiving = v;
           await this.plugin.saveSettings();
         }),
       );

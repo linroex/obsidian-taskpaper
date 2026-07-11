@@ -13,7 +13,14 @@ import {
   deleteBranch,
   moveBranchToProject,
 } from '../src/outlineOps';
-import { projectStats, documentCounts, savedSearches } from '../src/analysis';
+import { projectStats, documentCounts, rewriteSearchLine, savedSearches } from '../src/analysis';
+import {
+  ancestorProjectPath,
+  applyArchivePlan,
+  archiveDone,
+  planArchiveDone,
+  stripExtraTags,
+} from '../src/archive';
 import { focusVisibleLines, focusOutTarget, projectsToFold, toggleFocusTarget } from '../src/focus';
 
 let pass = 0;
@@ -413,6 +420,145 @@ check('documentCounts done=3', dc.done === 3, JSON.stringify(dc));
 const searchDoc = buildOutline(['Searches:', '\t- Hot @search(@today and not @done)'], 4);
 const ss = savedSearches(searchDoc);
 check('savedSearches parses', ss.length === 1 && ss[0].name === 'Hot' && ss[0].query === '@today and not @done', JSON.stringify(ss));
+
+// --- saved-search line rewrite ---
+check(
+  'rewriteSearchLine keeps indent + task marker',
+  rewriteSearchLine('\t- Old name @search(@done)', 'Hot', '@today and not @done') ===
+    '\t- Hot @search(@today and not @done)',
+  rewriteSearchLine('\t- Old name @search(@done)', 'Hot', '@today and not @done'),
+);
+check(
+  'rewriteSearchLine on a note line has no marker',
+  rewriteSearchLine('\tHot @search(x)', 'Cold', 'y') === '\tCold @search(y)',
+  rewriteSearchLine('\tHot @search(x)', 'Cold', 'y'),
+);
+check(
+  'rewriteSearchLine escapes parens in the query',
+  rewriteSearchLine('- s @search(a)', 's', 'not (@done or @today)') === '- s @search(not \\(@done or @today\\))',
+  rewriteSearchLine('- s @search(a)', 's', 'not (@done or @today)'),
+);
+check(
+  'rewriteSearchLine drops stale extra tags',
+  rewriteSearchLine('\t- Old @flag @search(a)', 'New', 'b') === '\t- New @search(b)',
+  rewriteSearchLine('\t- Old @flag @search(a)', 'New', 'b'),
+);
+
+// --- archive: ancestor project path + tag stripping ---
+const pathDoc = buildOutline(['2026 Goals:', '\tWork:', '\t\t- ship @done', 'Archive:'], 4);
+const shipItem = pathDoc.items.find((i) => i.displayText.startsWith('ship'))!;
+check(
+  'ancestorProjectPath joins all ancestor projects',
+  ancestorProjectPath(shipItem, 'Archive') === '2026 Goals / Work',
+  String(ancestorProjectPath(shipItem, 'Archive')),
+);
+check('ancestorProjectPath top level -> undefined', ancestorProjectPath(pathDoc.roots[0], 'Archive') === undefined);
+const inArchive = buildOutline(['Archive:', '\t- x @done'], 4).items[1];
+check('ancestorProjectPath excludes the archive project', ancestorProjectPath(inArchive, 'Archive') === undefined);
+check(
+  'stripExtraTags keeps only listed tags',
+  stripExtraTags('\t- a @flag @done(2026-07-01) @due(x) @project(P)', ['done', 'project']) ===
+    '\t- a @done(2026-07-01) @project(P)',
+  stripExtraTags('\t- a @flag @done(2026-07-01) @due(x) @project(P)', ['done', 'project']),
+);
+check('stripExtraTags no-op when nothing extra', stripExtraTags('- a @done', ['done', 'project']) === '- a @done');
+
+// --- archive: done items move to the TOP of the Archive project ---
+const archDoc = [
+  '2026 Goals:',
+  '\tWork:',
+  '\t\t- ship @done(2026-07-01) @flag',
+  '\t\t\t- follow-up note',
+  '\t\t- keep',
+  'Archive:',
+  '\t- old @done @project(Old)',
+];
+const archPlan = planArchiveDone(archDoc, 4)!;
+check('archive plan removes the done subtree', JSON.stringify(archPlan.removals) === '[[2,4]]', JSON.stringify(archPlan.removals));
+check('archive plan inserts right after the Archive line', archPlan.insertAt === 6, String(archPlan.insertAt));
+const archived = archiveDone(archDoc, 4);
+check(
+  'archive inserts above existing archived items, with full @project path',
+  archived !== null &&
+    archived.join('|') ===
+      '2026 Goals:|\tWork:|\t\t- keep|Archive:|\t- ship @done(2026-07-01) @flag @project(2026 Goals / Work)|\t\t- follow-up note|\t- old @done @project(Old)',
+  JSON.stringify(archived),
+);
+check(
+  'applyArchivePlan matches archiveDone',
+  JSON.stringify(applyArchivePlan(archDoc, archPlan)) === JSON.stringify(archived),
+);
+const midArch = archiveDone(['Archive:', '\t- old @done', 'Inbox:', '\t- a @done', '\t- b'], 4);
+check(
+  'archive project mid-document still gets new items first',
+  midArch !== null && midArch.join('|') === 'Archive:|\t- a @done @project(Inbox)|\t- old @done|Inbox:|\t- b',
+  JSON.stringify(midArch),
+);
+const multiArch = archiveDone(['A:', '\t- one @done', '\t- two @done', 'Archive:', '\t- older @done'], 4);
+check(
+  'items archived together keep document order, above older ones',
+  multiArch !== null &&
+    multiArch.join('|') === 'A:|Archive:|\t- one @done @project(A)|\t- two @done @project(A)|\t- older @done',
+  JSON.stringify(multiArch),
+);
+const freshArch = archiveDone(['Inbox:', '\t- a @done', '\t- b'], 4);
+check(
+  'archive project created at document end when missing',
+  freshArch !== null && freshArch.join('|') === 'Inbox:|\t- b||Archive:|\t- a @done @project(Inbox)',
+  JSON.stringify(freshArch),
+);
+const noTagArch = archiveDone(['Work:', '\t- x @done', 'Archive:'], 4, { addProjectTag: false });
+check(
+  'addProjectTag=false omits @project',
+  noTagArch !== null && noTagArch.join('|') === 'Work:|Archive:|\t- x @done',
+  JSON.stringify(noTagArch),
+);
+const strippedArch = archiveDone(
+  ['Work:', '\t- x @done(2026-07-01) @flag @due(2026-08-01)', 'Archive:'],
+  4,
+  { removeExtraTags: true },
+);
+check(
+  'removeExtraTags strips all but @done/@project',
+  strippedArch !== null && strippedArch[2] === '\t- x @done(2026-07-01) @project(Work)',
+  JSON.stringify(strippedArch),
+);
+const keepProjArch = archiveDone(['Work:', '\t- x @done @project(Original)', 'Archive:'], 4);
+check(
+  'an existing @project value is preserved',
+  keepProjArch !== null && keepProjArch[2] === '\t- x @done @project(Original)',
+  JSON.stringify(keepProjArch),
+);
+const nestedArch = archiveDone(['W:', '\t- p @done', '\t\t- c @done', 'Archive:'], 4);
+check(
+  'done child of a done parent is archived once, with its parent',
+  nestedArch !== null && nestedArch.join('|') === 'W:|Archive:|\t- p @done @project(W)|\t\t- c @done',
+  JSON.stringify(nestedArch),
+);
+check('already-archived items are not re-archived', archiveDone(['A:', '\t- x', 'Archive:', '\t- y @done'], 4) === null);
+check(
+  'adjacent done subtrees coalesce into one removal',
+  JSON.stringify(planArchiveDone(['A:', '\t- one @done', '\t- two @done', 'Archive:'], 4)!.removals) === '[[1,3]]',
+  JSON.stringify(planArchiveDone(['A:', '\t- one @done', '\t- two @done', 'Archive:'], 4)!.removals),
+);
+const endArch = archiveDone(['Archive:', '\t- old @done', 'A:', '\t- z @done'], 4);
+check(
+  'archiving the last line leaves no trailing blank',
+  endArch !== null && endArch.join('|') === 'Archive:|\t- z @done @project(A)|\t- old @done|A:',
+  JSON.stringify(endArch),
+);
+const wholeArch = archiveDone(['- a @done', '- b @done'], 4);
+check(
+  'archiving an all-done document yields just the Archive project',
+  wholeArch !== null && wholeArch.join('|') === 'Archive:|\t- a @done|\t- b @done',
+  JSON.stringify(wholeArch),
+);
+const customArch = archiveDone(['A:', '\t- x @done', '完成:'], 4, { archiveName: '完成' });
+check(
+  'custom archive project name',
+  customArch !== null && customArch.join('|') === 'A:|完成:|\t- x @done @project(A)',
+  JSON.stringify(customArch),
+);
 
 // --- focus behaviors ---
 // doc: Inbox(0) / -a today(1) / -b(2) / Work(3) / -c(4) / -c2(5) nested
