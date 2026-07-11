@@ -8,9 +8,10 @@
     "build": "node esbuild.config.mjs production",
     "dev": "node esbuild.config.mjs",
     "compile": "tsc --noEmit",
-    "test": "npm run test:unit && npm run test:e2e",
+    "test": "npm run test:unit && npm run test:e2e && npm run test:e2e:palettes",
     "test:unit": "esbuild test/editor.test.ts --bundle --platform=node --format=cjs --outfile=out-test/editor.cjs && node out-test/editor.cjs",
-    "test:e2e": "esbuild test/e2e.test.ts --bundle --platform=node --format=cjs --alias:obsidian=./test/stubs/obsidian.ts --external:jsdom --outfile=out-test/e2e.cjs && node out-test/e2e.cjs"
+    "test:e2e": "esbuild test/e2e.test.ts --bundle --platform=node --format=cjs --alias:obsidian=./test/stubs/obsidian.ts --external:jsdom --outfile=out-test/e2e.cjs && node out-test/e2e.cjs",
+    "test:e2e:palettes": "esbuild test/e2e.palettes.test.ts --bundle --platform=node --format=cjs --alias:obsidian=./test/stubs/obsidian.ts --external:jsdom --outfile=out-test/e2e.palettes.cjs && node out-test/e2e.palettes.cjs"
   },
   "dependencies": {
     "@taskpaper/core": "*"

@@ -1,5 +1,6 @@
 import { App, FuzzySuggestModal, Modal } from 'obsidian';
 import { Item, parseQuery, resolveDateExpression } from '@taskpaper/core';
+import type { PaletteEntry } from './paletteEntries';
 
 /** Prompts for a TaskPaper query. Calls onSubmit(query) or onSubmit(null) to clear. */
 export class QueryModal extends Modal {
@@ -272,6 +273,35 @@ export class SearchSuggestModal extends FuzzySuggestModal<SearchEntry> {
   }
 
   onChooseItem(entry: SearchEntry): void {
+    this.onChoose(entry);
+  }
+}
+
+/**
+ * Fuzzy quick-pick over palette entries (Go to anything… / Go to tag…) —
+ * thin glue over FuzzySuggestModal; the entries and their actions live in
+ * paletteEntries.ts.
+ */
+export class PaletteSuggestModal extends FuzzySuggestModal<PaletteEntry> {
+  constructor(
+    app: App,
+    private entries: PaletteEntry[],
+    private onChoose: (entry: PaletteEntry) => void,
+    placeholder: string,
+  ) {
+    super(app);
+    this.setPlaceholder(placeholder);
+  }
+
+  getItems(): PaletteEntry[] {
+    return this.entries;
+  }
+
+  getItemText(entry: PaletteEntry): string {
+    return entry.text;
+  }
+
+  onChooseItem(entry: PaletteEntry): void {
     this.onChoose(entry);
   }
 }
