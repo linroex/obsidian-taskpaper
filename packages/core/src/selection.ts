@@ -4,7 +4,7 @@
  * Edit > Selection menu). Positions are 0-based {line, col} pairs so the
  * caller can translate to/from its own document offsets.
  */
-import { buildOutline, Item, itemAtLine } from './model';
+import { buildOutline, Item, itemAtLine, Outline } from './model';
 
 /** A selection expressed as 0-based line/column endpoints (start <= end). */
 export interface SelectionRange {
@@ -106,4 +106,39 @@ export function expandSelectionRange(
     return null;
   }
   return fullLines(lines, 0, lastLine);
+}
+
+
+/**
+ * The top-level (non-nested) items covered by the given 0-based line ranges,
+ * as their line numbers in document order. A range that contains no item
+ * directly falls back to the item covering its first line. Items nested
+ * inside an already-collected root are skipped — branch operations act on
+ * whole subtrees.
+ */
+export function selectedRootLines(
+  outline: Outline,
+  ranges: Array<[number, number]>,
+): number[] {
+  const roots: Item[] = [];
+  const covered = (line: number): boolean =>
+    roots.some((r) => line >= r.line && line <= r.subtreeEnd);
+  for (const [start, end] of ranges) {
+    let added = false;
+    for (const item of outline.items) {
+      if (item.line >= start && item.line <= end) {
+        added = true;
+        if (!covered(item.line)) {
+          roots.push(item);
+        }
+      }
+    }
+    if (!added) {
+      const item = itemAtLine(outline, start);
+      if (item && !covered(item.line)) {
+        roots.push(item);
+      }
+    }
+  }
+  return roots.map((r) => r.line).sort((a, b) => a - b);
 }

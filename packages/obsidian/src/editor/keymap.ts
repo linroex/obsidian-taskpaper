@@ -2,6 +2,7 @@ import { EditorState } from '@codemirror/state';
 import { EditorView, KeyBinding } from '@codemirror/view';
 import { lineKind } from '@taskpaper/core';
 import { isFilterActive } from './filter';
+import { OUTLINE_TAB_SIZE } from './outline';
 
 /**
  * Whether Escape should clear the active filter/focus (TaskPaper 3: Escape
@@ -99,7 +100,7 @@ const backspaceUnindent: KeyBinding = {
       return false;
     }
     const line = state.doc.lineAt(sel.head);
-    const del = backspaceUnindentDeletion(line.text, sel.head - line.from, 4);
+    const del = backspaceUnindentDeletion(line.text, sel.head - line.from, OUTLINE_TAB_SIZE);
     if (!del) {
       return false;
     }

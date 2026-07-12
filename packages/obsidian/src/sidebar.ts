@@ -11,9 +11,12 @@ import {
   SavedSearch,
   savedSearches,
   tagNamesToValues,
+  Outline,
+  stripTags,
   tagValueCounts,
 } from '@taskpaper/core';
-import { outlineOf } from './editor/outline';
+import { docLines } from './editor/outlineEdit';
+import { outlineOf, OUTLINE_TAB_SIZE } from './editor/outline';
 import { filterSpecField, setFilterEffect } from './editor/filter';
 import { SaveSearchModal } from './modals';
 import {
@@ -30,12 +33,20 @@ import {
   visibleTagCounts,
 } from './sidebarLogic';
 
-/** A project's display text minus its trailing tags — the selection's name key. */
-function cleanProjectName(displayText: string): string {
-  return displayText.replace(/\s*@[A-Za-z0-9._-]+(\([^)]*\))?/g, '').trim();
-}
 import type TaskPaperPlugin from './main';
 import type { TaskPaperView } from './view';
+
+
+/** Everything a sidebar section needs to render (built once per render pass). */
+interface RenderContext {
+  view: TaskPaperView;
+  outline: Outline;
+  selection: SidebarSelectionItem[];
+  activeQuery: string | null;
+  /** Click = single select (again = clear); Ctrl/Cmd+click = multi-select. */
+  select(item: SidebarSelectionItem, e: MouseEvent): void;
+  isRowSelected(item: SidebarSelectionItem): boolean;
+}
 
 export const VIEW_TYPE_SIDEBAR = 'taskpaper-sidebar';
 
@@ -92,7 +103,7 @@ export class TaskPaperSidebarView extends ItemView {
       const outline = outlineOf(view.editor.state);
       const validated = validateSelection(view.sidebarSelection, (line) => {
         const item = outline.items.find((i) => i.line === line);
-        return item?.kind === 'project' ? cleanProjectName(item.displayText) : undefined;
+        return item?.kind === 'project' ? stripTags(item.displayText) : undefined;
       });
       const dropped = validated !== view.sidebarSelection;
       view.sidebarSelection = validated;
@@ -146,24 +157,20 @@ export class TaskPaperSidebarView extends ItemView {
     const clearBtn = toolbar.createEl('button', { text: '顯示全部', cls: 'tp-sb-clear' });
     clearBtn.onclick = () => this.clearFocus(view);
 
-    // Searches section: global searches (from settings) first, then the document's own @search items.
-    const globalSearches = this.plugin.settings.globalSearches.filter((s) => s.query.trim() !== '');
-    const searches = savedSearches(outline);
-    const searchSection = container.createDiv({ cls: 'tp-sb-section' });
-    const searchHeading = searchSection.createDiv({ cls: 'tp-sb-heading', text: 'Searches' });
-    // TaskPaper parity: right-click the "Searches" heading to create a new search.
-    searchHeading.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      const menu = new Menu();
-      menu.addItem((mi) =>
-        mi
-          .setTitle('新增搜尋')
-          .setIcon('plus')
-          .onClick(() => this.plugin.commands.saveSearch(view)),
-      );
-      menu.showAtMouseEvent(e);
-    });
-    // Click = single select (again = clear); Ctrl/Cmd+click = multi-select.
+    const ctx = this.buildRenderContext(view, outline, selection, activeQuery);
+    this.renderSearches(container, ctx);
+    this.renderProjects(container, ctx);
+    this.renderTags(container, ctx);
+  }
+
+
+  /** Build the shared per-render context: selection state + click semantics. */
+  private buildRenderContext(
+    view: TaskPaperView,
+    outline: Outline,
+    selection: SidebarSelectionItem[],
+    activeQuery: string | null,
+  ): RenderContext {
     const select = (item: SidebarSelectionItem, e: MouseEvent) => {
       const multi = e.ctrlKey || e.metaKey;
       // A plain click on the row of an externally applied filter clears it.
@@ -186,12 +193,33 @@ export class TaskPaperSidebarView extends ItemView {
         item.kind !== 'project' &&
         item.kind !== 'hoist' &&
         activeQuery === item.query);
+    return { view, outline, selection, activeQuery, select, isRowSelected };
+  }
+
+  private renderSearches(container: HTMLElement, ctx: RenderContext): void {
+    // Searches section: global searches (from settings) first, then the document's own @search items.
+    const globalSearches = this.plugin.settings.globalSearches.filter((s) => s.query.trim() !== '');
+    const searches = savedSearches(ctx.outline);
+    const searchSection = container.createDiv({ cls: 'tp-sb-section' });
+    const searchHeading = searchSection.createDiv({ cls: 'tp-sb-heading', text: 'Searches' });
+    // TaskPaper parity: right-click the "Searches" heading to create a new search.
+    searchHeading.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const menu = new Menu();
+      menu.addItem((mi) =>
+        mi
+          .setTitle('新增搜尋')
+          .setIcon('plus')
+          .onClick(() => this.plugin.commands.saveSearch(ctx.view)),
+      );
+      menu.showAtMouseEvent(e);
+    });
     const addSearch = (name: string, query: string, global: boolean): HTMLElement => {
       const el = searchSection.createDiv({
         cls: global ? 'tp-sb-item tp-sb-search tp-sb-search-global' : 'tp-sb-item tp-sb-search',
       });
       const selItem: SidebarSelectionItem = { kind: 'search', query };
-      if (isRowSelected(selItem)) {
+      if (ctx.isRowSelected(selItem)) {
         el.addClass('is-focused');
       }
       el.createSpan({ cls: 'tp-sb-search-name', text: name });
@@ -199,7 +227,7 @@ export class TaskPaperSidebarView extends ItemView {
         el.createSpan({ cls: 'tp-sb-global-badge', text: '全域' });
       }
       el.setAttr('title', query);
-      el.onclick = (e) => select(selItem, e);
+      el.onclick = (e) => ctx.select(selItem, e);
       return el;
     };
     for (const s of globalSearches) {
@@ -208,14 +236,16 @@ export class TaskPaperSidebarView extends ItemView {
     }
     for (const s of searches) {
       const el = addSearch(s.name, s.query, false);
-      el.addEventListener('contextmenu', (e) => this.showDocumentSearchMenu(e, view, s));
+      el.addEventListener('contextmenu', (e) => this.showDocumentSearchMenu(e, ctx.view, s));
     }
+  }
 
+  private renderProjects(container: HTMLElement, ctx: RenderContext): void {
     // Projects section.
-    const stats = projectStats(outline);
+    const stats = projectStats(ctx.outline);
     const projSection = container.createDiv({ cls: 'tp-sb-section' });
     projSection.createDiv({ cls: 'tp-sb-heading', text: 'Projects' });
-    const projects = outline.items.filter((i) => i.kind === 'project');
+    const projects = ctx.outline.items.filter((i) => i.kind === 'project');
     if (projects.length === 0) {
       projSection.createDiv({ cls: 'tp-sb-empty', text: '（無專案）' });
     }
@@ -228,7 +258,7 @@ export class TaskPaperSidebarView extends ItemView {
       while (pathStack.length > p.level) {
         pathStack.pop();
       }
-      const name = cleanProjectName(p.displayText);
+      const name = stripTags(p.displayText);
       pathStack[p.level] = name;
       const path = pathStack.slice(0, p.level + 1).join('/');
       const collapsedAncestor = (() => {
@@ -251,36 +281,38 @@ export class TaskPaperSidebarView extends ItemView {
       el.style.paddingLeft = `${8 + p.level * 14}px`;
       const selItem: SidebarSelectionItem = { kind: 'project', line: p.line, name };
       const hoistItem: SidebarSelectionItem = { kind: 'hoist', line: p.line, name };
-      if (isSelected(selection, selItem) || view.focusedLine === p.line) {
+      if (isSelected(ctx.selection, selItem) || ctx.view.focusedLine === p.line) {
         el.addClass('is-focused');
       }
-      if (isSelected(selection, hoistItem)) {
+      if (isSelected(ctx.selection, hoistItem)) {
         el.addClass('is-hoisted');
       }
       el.createSpan({ text: p.displayText || '(未命名)' });
       const remaining = stats.get(p)?.remaining ?? 0;
       if (remaining > 0) {
-        el.createSpan({ cls: 'tp-sb-tag-count', text: String(remaining) });
+        el.createSpan({ cls: 'tp-sb-count', text: String(remaining) });
       }
       // Original: double-click hoists. Our single click already toggles focus,
       // so hoist rides on Alt/Option+click (and the context menu below).
       el.onclick = (e) => {
         if (e.altKey) {
-          this.hoistProject(view, hoistItem);
+          this.hoistProject(ctx.view, hoistItem);
         } else {
-          select(selItem, e);
+          ctx.select(selItem, e);
         }
       };
-      el.addEventListener('contextmenu', (e) => this.showProjectMenu(e, view, hoistItem));
-      this.registerProjectDrag(el, view, p.line);
+      el.addEventListener('contextmenu', (e) => this.showProjectMenu(e, ctx.view, hoistItem));
+      this.registerProjectDrag(el, ctx.view, p.line);
       if (hasChildProjects(p)) {
         this.addChevron(el, `project:${path}`);
       }
     }
+  }
 
+  private renderTags(container: HTMLElement, ctx: RenderContext): void {
     // Tags section.
     const counts = new Map<string, number>();
-    for (const item of outline.items) {
+    for (const item of ctx.outline.items) {
       for (const name of item.tags.keys()) {
         counts.set(name, (counts.get(name) ?? 0) + 1);
       }
@@ -295,17 +327,17 @@ export class TaskPaperSidebarView extends ItemView {
     if (sorted.length === 0) {
       tagSection.createDiv({ cls: 'tp-sb-empty', text: '（無標籤）' });
     }
-    const namesToValues = tagNamesToValues(outline);
-    const valueCounts = tagValueCounts(outline);
+    const namesToValues = tagNamesToValues(ctx.outline);
+    const valueCounts = tagValueCounts(ctx.outline);
     for (const [name, count] of sorted) {
       const el = tagSection.createDiv({ cls: 'tp-sb-item tp-sb-tag' });
       const tagItem: SidebarSelectionItem = { kind: 'tag', query: `@${name}` };
-      if (isRowSelected(tagItem)) {
+      if (ctx.isRowSelected(tagItem)) {
         el.addClass('is-focused');
       }
       el.createSpan({ cls: 'tp-sb-tag-name', text: `@${name}` });
-      el.createSpan({ cls: 'tp-sb-tag-count', text: String(count) });
-      el.onclick = (e) => select(tagItem, e);
+      el.createSpan({ cls: 'tp-sb-count', text: String(count) });
+      el.onclick = (e) => ctx.select(tagItem, e);
       const values = namesToValues.get(name) ?? [];
       if (values.length > 0) {
         this.addChevron(el, `tag:${name}`);
@@ -321,15 +353,15 @@ export class TaskPaperSidebarView extends ItemView {
           query: `@${name} contains[l] ${quoteQueryValue(value)}`,
         };
         const vel = tagSection.createDiv({ cls: 'tp-sb-item tp-sb-tag-value' });
-        if (isRowSelected(valueItem)) {
+        if (ctx.isRowSelected(valueItem)) {
           vel.addClass('is-focused');
         }
         vel.createSpan({ text: value });
         vel.createSpan({
-          cls: 'tp-sb-tag-count',
+          cls: 'tp-sb-count',
           text: String(valueCounts.get(name)?.get(value) ?? 0),
         });
-        vel.onclick = (e) => select(valueItem, e);
+        vel.onclick = (e) => ctx.select(valueItem, e);
       }
     }
   }
@@ -510,14 +542,10 @@ export class TaskPaperSidebarView extends ItemView {
     targetLine: number,
     after: boolean,
   ): void {
-    const doc = view.editor.state.doc;
-    const lines: string[] = [];
-    for (let i = 1; i <= doc.lines; i++) {
-      lines.push(doc.line(i).text);
-    }
+    const lines = docLines(view.editor.state);
     const edit = after
-      ? moveBranchAfter(lines, sourceLine, targetLine, 4)
-      : moveBranchBefore(lines, sourceLine, targetLine, 4);
+      ? moveBranchAfter(lines, sourceLine, targetLine, OUTLINE_TAB_SIZE)
+      : moveBranchBefore(lines, sourceLine, targetLine, OUTLINE_TAB_SIZE);
     if (!edit) {
       return;
     }
@@ -527,7 +555,7 @@ export class TaskPaperSidebarView extends ItemView {
       anchor += edit.lines[i].length + br.length;
     }
     view.editor.dispatch({
-      changes: { from: 0, to: doc.length, insert: edit.lines.join(br) },
+      changes: { from: 0, to: view.editor.state.doc.length, insert: edit.lines.join(br) },
       selection: EditorSelection.cursor(anchor),
       scrollIntoView: true,
     });

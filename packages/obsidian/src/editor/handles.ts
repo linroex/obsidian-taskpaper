@@ -19,7 +19,8 @@ import {
 } from '@taskpaper/core';
 import { setFilterEffect } from './filter';
 import { foldedRangeAtLine, subtreeFoldRange } from './folding';
-import { outlineOf, visibleItems } from './outline';
+import { docLines } from './outlineEdit';
+import { outlineOf, visibleItems, OUTLINE_TAB_SIZE } from './outline';
 
 // ---------------------------------------------------------------------------
 // Pure logic (testable)
@@ -76,58 +77,6 @@ export function planFreeDrag(
   };
 }
 
-/**
- * Compute the result of dragging the handle on `itemLine` until the pointer
- * hovers `hoverLine`: the branch moves among its siblings — dragging up drops
- * it above the hovered sibling, dragging down drops it below (with the whole
- * subtree). Returns null when the drop would be a no-op. (Pure; testable.)
- */
-export function planHandleDrag(
-  lines: string[],
-  itemLine: number,
-  hoverLine: number,
-  tabSize: number,
-): HandleDragPlan | null {
-  const outline = buildOutline(lines, tabSize);
-  const item = outline.items.find((i) => i.line === itemLine);
-  if (!item) {
-    return null;
-  }
-  const siblings = item.parent ? item.parent.children : outline.roots;
-  if (siblings.length < 2) {
-    return null;
-  }
-
-  // Clamp the pointer into the siblings' region, then find the hovered sibling.
-  const first = siblings[0];
-  const last = siblings[siblings.length - 1];
-  const hover = Math.max(first.line, Math.min(last.subtreeEnd, hoverLine));
-  let target = siblings[0];
-  for (const s of siblings) {
-    if (s.line <= hover) {
-      target = s;
-    }
-  }
-  if (target === item) {
-    return null;
-  }
-
-  // Hovering a sibling above the item drops before it; below drops after it.
-  let insertBefore = target.line < item.line ? target.line : target.subtreeEnd + 1;
-  if (insertBefore === item.line || insertBefore === item.subtreeEnd + 1) {
-    return null; // lands exactly where it already is
-  }
-
-  const block = lines.slice(item.line, item.subtreeEnd + 1);
-  const out = lines.slice();
-  out.splice(item.line, block.length);
-  const indicatorLine = insertBefore;
-  if (insertBefore > item.line) {
-    insertBefore -= block.length;
-  }
-  out.splice(insertBefore, 0, ...block);
-  return { indicatorLine, lines: out, cursorLine: insertBefore };
-}
 
 // ---------------------------------------------------------------------------
 // View glue
@@ -189,16 +138,9 @@ function toggleHandleFold(view: EditorView, lineNo: number): void {
   }
 }
 
-function docLines(view: EditorView): string[] {
-  const lines: string[] = [];
-  for (let i = 1; i <= view.state.doc.lines; i++) {
-    lines.push(view.state.doc.line(i).text);
-  }
-  return lines;
-}
 
 /** CSS class marking the sidebar project row hovered during a handle drag. */
-export const SIDEBAR_DROP_CLASS = 'tp-sb-drop-into';
+const SIDEBAR_DROP_CLASS = 'tp-sb-drop-into';
 
 /**
  * A live drag session started from a handle. Tracks the pointer, shows a drop
@@ -280,7 +222,7 @@ class HandleDrag {
     } catch {
       // headless layout — keep the default
     }
-    this.plan = planFreeDrag(docLines(this.view), this.itemLine, hoverLine, dropAfter, 4);
+    this.plan = planFreeDrag(docLines(this.view.state), this.itemLine, hoverLine, dropAfter, OUTLINE_TAB_SIZE);
     this.planDoc = this.view.state.doc;
     this.drawIndicator();
   }
@@ -343,7 +285,7 @@ class HandleDrag {
       if (Number.isNaN(projectLine)) {
         return;
       }
-      const edit = moveBranchToProject(docLines(this.view), this.itemLine, projectLine, 4);
+      const edit = moveBranchToProject(docLines(this.view.state), this.itemLine, projectLine, OUTLINE_TAB_SIZE);
       if (edit) {
         this.commitLines(edit.lines, edit.cursorLine);
       }

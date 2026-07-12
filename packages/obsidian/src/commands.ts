@@ -28,11 +28,12 @@ import {
   removeTag,
   toggleDoneLine,
   savedSearches,
+  selectedRootLines,
   setLineKind,
   setTagValue,
   todayStamp,
 } from '@taskpaper/core';
-import { outlineOf } from './editor/outline';
+import { outlineOf, OUTLINE_TAB_SIZE } from './editor/outline';
 import { setFilterEffect } from './editor/filter';
 import {
   foldedRangeAtLine,
@@ -65,6 +66,8 @@ import {
 } from './paletteEntries';
 import type TaskPaperPlugin from './main';
 import { TaskPaperView } from './view';
+
+const NOTICE_NO_PROJECTS = 'No projects in this document.';
 
 export class TaskPaperCommands {
   constructor(private plugin: TaskPaperPlugin) {}
@@ -153,7 +156,7 @@ export class TaskPaperCommands {
     new TextPromptModal(this.plugin.app, 'Group', '專案名稱', (name) => {
       const state = view.editor.state;
       const [start, end] = selectedLineRange(state);
-      const result = groupItems(docLines(state), start, end, name, 4);
+      const result = groupItems(docLines(state), start, end, name, OUTLINE_TAB_SIZE);
       if (result) {
         dispatchOutlineEdit(view.editor, result);
         view.editor.focus();
@@ -165,27 +168,15 @@ export class TaskPaperCommands {
    *  bottom-up so earlier lines stay stable). */
   duplicate(view: TaskPaperView): void {
     const state = view.editor.state;
-    const outline = outlineOf(state);
-    const roots: number[] = [];
-    for (const [start, end] of selectedLineRanges(state)) {
-      for (const item of outline.items) {
-        if (item.line >= start && item.line <= end &&
-            !roots.some((r) => {
-              const root = outline.items.find((i) => i.line === r);
-              return root !== undefined && item.line > r && item.line <= root.subtreeEnd;
-            })) {
-          roots.push(item.line);
-        }
-      }
-    }
+    const roots = selectedRootLines(outlineOf(state), selectedLineRanges(state));
     if (roots.length === 0) {
       applyOutlineOp(view.editor, duplicateBranch);
       return;
     }
     let lines = docLines(state);
     let cursorLine = 0;
-    for (const line of roots.sort((a, b) => b - a)) {
-      const step = duplicateBranch(lines, line, 4);
+    for (const line of [...roots].reverse()) {
+      const step = duplicateBranch(lines, line, OUTLINE_TAB_SIZE);
       if (step) {
         lines = step.lines;
         cursorLine = step.cursorLine;
@@ -201,7 +192,7 @@ export class TaskPaperCommands {
     let lines = docLines(state);
     let result = null;
     for (const [start, end] of selectedLineRanges(state).reverse()) {
-      const step = deleteBranch(lines, start, end, 4);
+      const step = deleteBranch(lines, start, end, OUTLINE_TAB_SIZE);
       if (step) {
         lines = step.lines;
         result = step;
@@ -217,24 +208,7 @@ export class TaskPaperCommands {
   moveToProject(view: TaskPaperView): void {
     const state = view.editor.state;
     const outline = outlineOf(state);
-    const itemLines: number[] = [];
-    for (const [start, end] of selectedLineRanges(state)) {
-      // Track per range — a later cursor sitting on a non-item line must
-      // still resolve via itemAtLine even when earlier ranges found items.
-      let added = false;
-      for (const item of outline.items) {
-        if (item.line >= start && item.line <= end) {
-          itemLines.push(item.line);
-          added = true;
-        }
-      }
-      if (!added) {
-        const item = itemAtLine(outline, start);
-        if (item) {
-          itemLines.push(item.line);
-        }
-      }
-    }
+    const itemLines = selectedRootLines(outline, selectedLineRanges(state));
     if (itemLines.length === 0) {
       return;
     }
@@ -245,7 +219,7 @@ export class TaskPaperCommands {
       });
     const projects = outline.items.filter((p) => p.kind === 'project' && !inSelection(p));
     if (projects.length === 0) {
-      new Notice('No projects in this document.');
+      new Notice(NOTICE_NO_PROJECTS);
       return;
     }
     const docAtOpen = state.doc;
@@ -400,7 +374,7 @@ export class TaskPaperCommands {
     const outline = outlineOf(state);
     const projects = outline.items.filter((i) => i.kind === 'project');
     if (projects.length === 0) {
-      new Notice('No projects in this document.');
+      new Notice(NOTICE_NO_PROJECTS);
       return;
     }
     new ProjectSuggestModal(this.plugin.app, projects, (item: Item) => {

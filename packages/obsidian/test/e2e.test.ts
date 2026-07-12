@@ -8,7 +8,7 @@
  *  - No layout, so anything that needs posAtCoords (drag-moving a handle to
  *    a *different* line, clicking plain text to place the cursor) cannot
  *    resolve a position — those paths are covered headlessly via their pure
- *    planners (planHandleDrag) in editor.test.ts. Here we cover the closest
+ *    planners (planFreeDrag) in editor.test.ts. Here we cover the closest
  *    DOM-event-driven path: the click (mousedown+mouseup, no move) gesture.
  *  - No contenteditable input pipeline (beforeinput + MutationObserver), so
  *    type() sends real keydowns and falls back to a dispatch for plain

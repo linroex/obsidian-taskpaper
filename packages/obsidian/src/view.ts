@@ -1,7 +1,7 @@
 import { Menu, setIcon, TextFileView, WorkspaceLeaf } from 'obsidian';
 import { EditorSelection, EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { parseQuery, todayStamp } from '@taskpaper/core';
+import { parseQuery, stripTags, todayStamp } from '@taskpaper/core';
 import { outlineOf } from './editor/outline';
 import { filterSpecField, searchbarText, setFilterEffect } from './editor/filter';
 import { createEditorExtensions } from './editor/setup';
@@ -99,6 +99,7 @@ export class TaskPaperView extends TextFileView {
     this.calendarPane = new CalendarPane(this.calendarEl, {
       state: () => this.editor.state,
       weekStart: () => this.plugin.settings.calendarWeekStart,
+      showWeekNumbers: () => this.plugin.settings.calendarShowWeekNumbers !== false,
       jumpToLine: (line) => {
         this.setViewMode('editor');
         this.editor.dispatch({
@@ -236,7 +237,7 @@ export class TaskPaperView extends TextFileView {
     let projectName: string | null = null;
     if (spec && spec.mode === 'focus' && this.focusedLine !== null) {
       const item = outlineOf(this.editor.state).items.find((i) => i.line === this.focusedLine);
-      projectName = item ? item.displayText.replace(/\s*@[A-Za-z0-9._-]+(\([^)]*\))?/g, '').trim() : null;
+      projectName = item ? stripTags(item.displayText) : null;
     }
     const hoisted =
       this.sidebarSelection.length === 1 && this.sidebarSelection[0].kind === 'hoist';

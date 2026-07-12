@@ -42,6 +42,7 @@ function mountCalendar(doc: string) {
   const calendar = new CalendarPane(root, {
     state: () => mounted.view.state,
     weekStart: () => 1,
+    showWeekNumbers: () => true,
     jumpToLine: (line) => {
       jumps.push(line);
       mounted.view.dispatch({
@@ -230,6 +231,7 @@ function textOf(occ: HTMLElement): string {
   const pane = new CalendarPane(root, {
     state: () => mounted.view.state,
     weekStart: () => 1,
+    showWeekNumbers: () => true,
     jumpToLine: () => {},
   });
   pane.now = () => TODAY;

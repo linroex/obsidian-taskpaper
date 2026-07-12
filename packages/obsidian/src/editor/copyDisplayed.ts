@@ -9,7 +9,7 @@ import { Decoration, EditorView } from '@codemirror/view';
 import { filterDecoField } from './filter';
 
 /** 1-based line numbers covered by the filter's hidden (block) runs. */
-export function hiddenFilterLines(state: EditorState): Set<number> {
+function hiddenFilterLines(state: EditorState): Set<number> {
   const hidden = new Set<number>();
   const deco = state.field(filterDecoField, false);
   if (!deco) {

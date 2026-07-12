@@ -499,7 +499,8 @@ body.taskpaper-no-strike .tp-done {
 
 .taskpaper-sidebar .tp-sb-item {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 4px;
   align-items: center;
   padding: 3px 8px;
   border-radius: var(--radius-s);
@@ -524,7 +525,7 @@ body.taskpaper-no-strike .tp-done {
 
 /* Inner spans carry their own colors — override them on the accent background. */
 .taskpaper-sidebar .tp-sb-item.is-focused .tp-sb-tag-name,
-.taskpaper-sidebar .tp-sb-item.is-focused .tp-sb-tag-count,
+.taskpaper-sidebar .tp-sb-item.is-focused .tp-sb-count,
 .taskpaper-sidebar .tp-sb-item.is-focused .tp-sb-search-name {
   color: var(--text-on-accent);
 }
@@ -546,9 +547,11 @@ body.taskpaper-no-strike .tp-done {
   color: var(--text-accent);
 }
 
-.taskpaper-sidebar .tp-sb-tag-count {
+.taskpaper-sidebar .tp-sb-count {
   color: var(--tp-tertiary);
   font-variant-numeric: tabular-nums;
+  /* Counts/badges hug the right edge; names stay left beside the chevron. */
+  margin-left: auto;
 }
 
 /* Fold chevrons on rows with children (projects with subprojects, tags with
@@ -593,6 +596,7 @@ body.taskpaper-no-strike .tp-done {
 }
 
 .taskpaper-sidebar .tp-sb-global-badge {
+  margin-left: auto;
   color: var(--tp-secondary);
   background: var(--background-modifier-hover);
   border: 1px solid var(--background-modifier-border);
@@ -674,11 +678,6 @@ body.taskpaper-no-strike .tp-done {
 }
 
 /* Header: source file + toolbar. */
-.taskpaper-calendar .tp-cal-file {
-  font-weight: 600;
-  font-size: var(--font-ui-medium);
-  margin-bottom: var(--size-4-1);
-}
 
 .taskpaper-calendar .tp-cal-toolbar {
   display: flex;

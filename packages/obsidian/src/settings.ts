@@ -15,6 +15,8 @@ export interface TaskPaperSettings {
   calendarWeekStart: number;
   /** Collapsed sidebar rows ("project:<path>" / "tag:<name>"), persisted. */
   sidebarCollapsed: string[];
+  /** Show ISO week labels (W627) in the calendar's month grid. */
+  calendarShowWeekNumbers: boolean;
   /** Saved searches shown in the sidebar for every document (TaskPaper's searches.taskpaper). */
   globalSearches: GlobalSearch[];
   /** Tags always shown in the sidebar even at count 0 — space/comma separated, '@' optional. Empty = show all found tags. */
@@ -32,6 +34,7 @@ export const DEFAULT_SETTINGS: TaskPaperSettings = {
   filterHidesInsteadOfDims: true,
   calendarWeekStart: 1,
   sidebarCollapsed: [],
+  calendarShowWeekNumbers: true,
   globalSearches: [
     { name: 'Today', query: '@today' },
     { name: 'Not Done', query: 'not @done' },
@@ -107,6 +110,17 @@ export class TaskPaperSettingTab extends PluginSettingTab {
         t.setValue(this.plugin.settings.filterHidesInsteadOfDims).onChange(async (v) => {
           this.plugin.settings.filterHidesInsteadOfDims = v;
           await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('行事曆：顯示週數')
+      .setDesc('月曆格左側顯示 ISO 週數標籤（例如 W627 = 2026 年第 27 週）。')
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.calendarShowWeekNumbers).onChange(async (v) => {
+          this.plugin.settings.calendarShowWeekNumbers = v;
+          await this.plugin.saveSettings();
+          this.plugin.refreshSidebar();
         }),
       );
 

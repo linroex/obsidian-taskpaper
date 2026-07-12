@@ -16,7 +16,7 @@ import { findLinks, linkHref } from '../src/editor/links';
 import { collectTagNames, tagCompletionSource } from '../src/editor/tagComplete';
 import { goToAnythingEntries, goToTagEntries } from '../src/paletteEntries';
 import { backspaceUnindentDeletion, escapeClearsFilter } from '../src/editor/keymap';
-import { handleLines, planHandleDrag } from '../src/editor/handles';
+import { handleLines, planFreeDrag } from '../src/editor/handles';
 import { guideDepths, leadingTabs } from '../src/editor/guides';
 import {
   linesToCollapseCompletely,
@@ -762,38 +762,44 @@ check('url opens as-is', linkHref({ kind: 'url', text: 'https://a.com' }) === 'h
   check('handles on items with children only', handleLines(outline).join(',') === '0,3');
 }
 
-// --- item handles: drag plan ---
+// --- item handles: free-drag plan (drop before/after ANY item) ---
 const DRAG_DOC = ['A:', '\t- a1', '\t- a2', 'B:', '\t- b1', 'C:'];
 {
-  const plan = planHandleDrag(DRAG_DOC, 0, 4, 4); // drag A down over B
+  const plan = planFreeDrag(DRAG_DOC, 0, 3, true, 4); // drop A after B
   check(
-    'dragging A over B moves the whole branch below B',
+    'dropping A after B moves the whole branch below B',
     plan !== null &&
       plan.lines.join('|') === 'B:|\t- b1|A:|\t- a1|\t- a2|C:' &&
-      plan.indicatorLine === 5 &&
-      plan.cursorLine === 2,
+      plan.indicatorLine === 5,
+    JSON.stringify(plan?.lines),
   );
 }
 {
-  const plan = planHandleDrag(DRAG_DOC, 3, 0, 4); // drag B up over A
+  const plan = planFreeDrag(DRAG_DOC, 3, 0, false, 4); // drop B before A
   check(
-    'dragging B over A moves it above A',
-    plan !== null && plan.lines.join('|') === 'B:|\t- b1|A:|\t- a1|\t- a2|C:' && plan.cursorLine === 0,
+    'dropping B before A moves it above',
+    plan !== null && plan.lines.join('|') === 'B:|\t- b1|A:|\t- a1|\t- a2|C:',
+    JSON.stringify(plan?.lines),
   );
 }
 {
-  const plan = planHandleDrag(DRAG_DOC, 1, 2, 4); // drag a1 below its single-line sibling a2
+  const plan = planFreeDrag(DRAG_DOC, 1, 4, true, 4); // a1 dropped after b1 → CROSS-PROJECT
   check(
-    'single-line sibling accepts a downward drop',
-    plan !== null && plan.lines.join('|') === 'A:|\t- a2|\t- a1|B:|\t- b1|C:',
+    'cross-project drop re-indents to the target level',
+    plan !== null && plan.lines.join('|') === 'A:|\t- a2|B:|\t- b1|\t- a1|C:',
+    JSON.stringify(plan?.lines),
   );
 }
-check('dropping on itself is a no-op', planHandleDrag(DRAG_DOC, 0, 1, 4) === null);
-check(
-  'hover clamps to the siblings region (a1 cannot leave A)',
-  planHandleDrag(DRAG_DOC, 2, 5, 4) === null,
-);
-check('an only child cannot move', planHandleDrag(DRAG_DOC, 4, 0, 4) === null);
+{
+  const plan = planFreeDrag(DRAG_DOC, 4, 5, true, 4); // an only child CAN now leave its parent
+  check(
+    'an only child moves out to the drop target level',
+    plan !== null && plan.lines.join('|') === 'A:|\t- a1|\t- a2|B:|C:|- b1',
+    JSON.stringify(plan?.lines),
+  );
+}
+check('dropping inside the dragged branch is a no-op', planFreeDrag(DRAG_DOC, 0, 1, true, 4) === null);
+check('adjacent identity drop is a no-op', planFreeDrag(DRAG_DOC, 2, 1, true, 4) === null);
 
 // --- collapse/expand all by level (original Shift-Cmd-9 / Shift-Cmd-0) ---
 {

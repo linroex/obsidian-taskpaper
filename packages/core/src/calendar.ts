@@ -1,3 +1,4 @@
+import { stripTags } from './tags';
 /**
  * Calendar model — pure date placement of a document's tasks onto a month
  * grid + agenda list, shared by the calendar views.
@@ -60,12 +61,15 @@ export interface CalendarOptions {
 }
 
 /** Strip trailing @tag(...)s from a display text (same shape the sidebar uses). */
-function stripTags(displayText: string): string {
-  return displayText.replace(/\s*@[A-Za-z0-9._-]+(\([^)]*\))?/g, '').trim();
-}
+
 
 /** Format a local Date as YYYY-MM-DD. */
-function isoDate(d: Date): string {
+/** Format a local Date as YYYY-MM. */
+export function isoMonth(d: Date): string {
+  return isoDate(d).slice(0, 7);
+}
+
+export function isoDate(d: Date): string {
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }

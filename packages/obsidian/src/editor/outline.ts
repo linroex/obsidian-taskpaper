@@ -2,6 +2,9 @@ import { EditorState, Text } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { buildOutline, Item, Outline } from '@taskpaper/core';
 
+/** The plugin's fixed outline tab size (also EditorState.tabSize in setup). */
+export const OUTLINE_TAB_SIZE = 4;
+
 const cache = new WeakMap<Text, Outline>();
 
 /** Build (and cache) a TaskPaper outline for a CodeMirror document. */
@@ -15,7 +18,7 @@ export function outlineOf(state: EditorState): Outline {
   for (let i = 1; i <= doc.lines; i++) {
     lines.push(doc.line(i).text);
   }
-  const outline = buildOutline(lines, 4);
+  const outline = buildOutline(lines, OUTLINE_TAB_SIZE);
   cache.set(doc, outline);
   return outline;
 }
@@ -23,7 +26,7 @@ export function outlineOf(state: EditorState): Outline {
 
 /** Per-outline line→item index, cached so viewport rebuilds stay O(viewport). */
 const itemIndexCache = new WeakMap<Outline, Map<number, Item>>();
-export function itemsByLine(outline: Outline): Map<number, Item> {
+function itemsByLine(outline: Outline): Map<number, Item> {
   let map = itemIndexCache.get(outline);
   if (!map) {
     map = new Map(outline.items.map((i) => [i.line, i]));

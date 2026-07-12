@@ -112,6 +112,11 @@ export function removeAllTags(lineText: string): string {
   return indent + body;
 }
 
+/** Display text minus its tags — for names, breadcrumbs and fingerprints. */
+export function stripTags(text: string): string {
+  return text.replace(/\s*@[A-Za-z0-9._-]+(\((?:\\.|[^)\\])*\))?/g, '').trim();
+}
+
 /** Toggle @done on a line: remove it if present, else stamp it (dropping @today). */
 export function toggleDoneLine(lineText: string, stamp: string): string {
   return hasTag(lineText, 'done')

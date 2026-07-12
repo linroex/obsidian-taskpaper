@@ -1,21 +1,18 @@
 import { Notice, setIcon } from 'obsidian';
 import type { EditorState } from '@codemirror/state';
-import { calendarModel, CalendarModel, CalendarOccurrence, isoWeekLabel, removeAllTags } from '@taskpaper/core';
+import {
+  calendarModel,
+  CalendarModel,
+  CalendarOccurrence,
+  isoDate,
+  isoMonth,
+  isoWeekLabel,
+  stripTags,
+} from '@taskpaper/core';
 import { outlineOf } from './editor/outline';
 
 /** Weekday glyph by Date#getDay() index. */
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
-
-/** Format a local Date as YYYY-MM-DD. */
-function isoDate(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
-
-/** Format a local Date as YYYY-MM. */
-function isoMonth(d: Date): string {
-  return isoDate(d).slice(0, 7);
-}
 
 /** Shift a YYYY-MM anchor by n months. */
 function shiftMonth(anchor: string, n: number): string {
@@ -31,6 +28,8 @@ export interface CalendarHost {
   jumpToLine(line: number): void;
   /** First day of the week: 1 = Monday, 0 = Sunday (user setting). */
   weekStart(): number;
+  /** Whether the month grid shows ISO week labels (W627). */
+  showWeekNumbers(): boolean;
 }
 
 /**
@@ -101,12 +100,14 @@ export class CalendarPane {
       this.monthAnchor = isoMonth(today);
     }
     const weekStart = this.host.weekStart();
+    const weekNumbers = this.host.showWeekNumbers();
     const signature = [
       state.doc.length,
       this.monthAnchor,
       this.mode,
       this.showCompleted,
       weekStart,
+      weekNumbers,
       isoDate(today),
     ].join('|');
     if (!force && signature === this.renderedSignature) {
@@ -208,15 +209,22 @@ export class CalendarPane {
 
   private renderMonthGrid(container: HTMLElement, model: CalendarModel, todayStr: string): void {
     const weekStart = this.host.weekStart();
-    const grid = container.createDiv({ cls: 'tp-cal-grid tp-cal-grid-weeks' });
-    // Week-number column (W601 = ISO week 1 of 2026), then the weekday headers.
-    grid.createDiv({ cls: 'tp-cal-weekday tp-cal-weeknum-head', text: 'W' });
+    const weekNumbers = this.host.showWeekNumbers();
+    const grid = container.createDiv({
+      cls: weekNumbers ? 'tp-cal-grid tp-cal-grid-weeks' : 'tp-cal-grid',
+    });
+    if (weekNumbers) {
+      // Week-number column (W601 = ISO week 1 of 2026) before the weekday headers.
+      grid.createDiv({ cls: 'tp-cal-weekday tp-cal-weeknum-head', text: 'W' });
+    }
     for (let i = 0; i < 7; i++) {
       grid.createDiv({ cls: 'tp-cal-weekday', text: WEEKDAYS[(weekStart + i) % 7] });
     }
     const maxShown = 3;
     for (const week of model.weeks) {
-      grid.createDiv({ cls: 'tp-cal-weeknum', text: isoWeekLabel(week[0].date) });
+      if (weekNumbers) {
+        grid.createDiv({ cls: 'tp-cal-weeknum', text: isoWeekLabel(week[0].date) });
+      }
       for (const day of week) {
         let cls = 'tp-cal-day';
         if (!day.inMonth) {
@@ -292,7 +300,7 @@ export class CalendarPane {
     // EXACT equality — a substring check could accept a different task whose
     // title merely contains the old one, and empty titles bypassed it.
     const fingerprint = (line: string): string =>
-      removeAllTags(line).replace(/^[\t ]*(?:-\s*)?/, '').trim();
+      stripTags(line.replace(/^[\t ]*(?:-\s*)?/, ''));
     const stale =
       occ.line + 1 > doc.lines ||
       fingerprint(doc.line(occ.line + 1).text) !== occ.text.trim();

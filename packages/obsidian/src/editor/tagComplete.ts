@@ -8,13 +8,13 @@ import { Outline, resolveDateExpression, tagNamesToValues } from '@taskpaper/cor
 import { outlineOf } from './outline';
 
 /** Tags TaskPaper always offers, even in an empty document. */
-export const DEFAULT_TAG_NAMES = ['done', 'today', 'due', 'start', 'search', 'priority', 'flag'];
+const DEFAULT_TAG_NAMES = ['done', 'today', 'due', 'start', 'search', 'priority', 'flag'];
 
 /** Tags whose values are dates — they also offer natural-language suggestions. */
-export const DATE_TAG_NAMES = ['due', 'start', 'defer'];
+const DATE_TAG_NAMES = ['due', 'start', 'defer'];
 
 /** Natural-language date expressions offered inside a date tag's parentheses. */
-export const DATE_SUGGESTIONS = ['today', 'tomorrow', 'next week'];
+const DATE_SUGGESTIONS = ['today', 'tomorrow', 'next week'];
 
 /** All completable tag names: the document's own tags plus the defaults (pure; testable). */
 export function collectTagNames(outline: Outline): string[] {

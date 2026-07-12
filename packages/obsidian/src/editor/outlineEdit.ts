@@ -1,6 +1,7 @@
 import { EditorSelection, EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { OutlineEdit } from '@taskpaper/core';
+import { OUTLINE_TAB_SIZE } from './outline';
 
 type Op = (lines: string[], line: number, tabSize: number) => OutlineEdit | null;
 
@@ -38,7 +39,7 @@ export function applyOutlineOp(view: EditorView, op: Op): boolean {
   const curLine = state.doc.lineAt(state.selection.main.head);
   const col = state.selection.main.head - curLine.from;
 
-  const result = op(docLines(state), curLine.number - 1, 4);
+  const result = op(docLines(state), curLine.number - 1, OUTLINE_TAB_SIZE);
   if (!result) {
     return false;
   }
