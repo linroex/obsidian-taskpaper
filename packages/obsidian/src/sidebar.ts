@@ -252,6 +252,9 @@ export class TaskPaperSidebarView extends ItemView {
     // Ancestor-path keys drive the persisted collapse state; children of a
     // collapsed project are skipped entirely.
     const pathStack: string[] = [];
+    // Same-named projects at the same ancestor path get an occurrence suffix
+    // (#1, #2 …) so their collapse keys never collide.
+    const pathCounts = new Map<string, number>();
     const hasChildProjects = (p: (typeof projects)[number]): boolean =>
       projects.some((q) => q !== p && q.line > p.line && q.line <= p.subtreeEnd);
     for (const p of projects) {
@@ -259,7 +262,10 @@ export class TaskPaperSidebarView extends ItemView {
         pathStack.pop();
       }
       const name = stripTags(p.displayText);
-      pathStack[p.level] = name;
+      const base = [...pathStack.slice(0, p.level), name].join('/');
+      const seen = pathCounts.get(base) ?? 0;
+      pathCounts.set(base, seen + 1);
+      pathStack[p.level] = seen === 0 ? name : `${name}#${seen}`;
       const path = pathStack.slice(0, p.level + 1).join('/');
       const collapsedAncestor = (() => {
         for (let l = 0; l < p.level; l++) {

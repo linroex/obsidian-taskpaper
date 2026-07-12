@@ -800,6 +800,16 @@ const DRAG_DOC = ['A:', '\t- a1', '\t- a2', 'B:', '\t- b1', 'C:'];
 }
 check('dropping inside the dragged branch is a no-op', planFreeDrag(DRAG_DOC, 0, 1, true, 4) === null);
 check('adjacent identity drop is a no-op', planFreeDrag(DRAG_DOC, 2, 1, true, 4) === null);
+{
+  // Hovering blank space clamps to the nearest item instead of vanishing.
+  const BLANK_TOP = ['', 'A:', '\t- a1', 'B:'];
+  const plan = planFreeDrag(BLANK_TOP, 3, 0, true, 4); // hover the leading blank line
+  check(
+    'hover above the first item drops BEFORE it',
+    plan !== null && plan.lines.join('|') === '|B:|A:|\t- a1',
+    JSON.stringify(plan?.lines),
+  );
+}
 
 // --- collapse/expand all by level (original Shift-Cmd-9 / Shift-Cmd-0) ---
 {

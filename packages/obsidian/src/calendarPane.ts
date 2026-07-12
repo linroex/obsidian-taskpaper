@@ -223,7 +223,15 @@ export class CalendarPane {
     const maxShown = 3;
     for (const week of model.weeks) {
       if (weekNumbers) {
-        grid.createDiv({ cls: 'tp-cal-weeknum', text: isoWeekLabel(week[0].date) });
+        // ISO weeks are Monday-based: label the row by ITS Monday, or a
+        // Sunday-start row would show the previous week's number for six
+        // of its seven days.
+        const monday =
+          week.find((d) => {
+            const [y, m, dd] = d.date.split('-').map(Number);
+            return new Date(y, m - 1, dd).getDay() === 1;
+          }) ?? week[0];
+        grid.createDiv({ cls: 'tp-cal-weeknum', text: isoWeekLabel(monday.date) });
       }
       for (const day of week) {
         let cls = 'tp-cal-day';

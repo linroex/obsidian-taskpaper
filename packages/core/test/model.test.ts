@@ -21,7 +21,7 @@ import {
   moveBranchBefore,
   moveBranchAfter,
 } from '../src/outlineOps';
-import { expandSelectionRange, selectBranchRange } from '../src/selection';
+import { expandSelectionRange, selectBranchRange, selectedRootLines } from '../src/selection';
 import { projectStats, documentCounts, rewriteSearchLine, savedSearches, tagNamesToValues } from '../src/analysis';
 import { markdownToTaskPaper } from '../src/convert';
 import {
@@ -201,10 +201,40 @@ check('@id present on all items', qa('@id').length === adv.items.length, String(
   check('2-space nesting becomes a tab', tp[4] === '\t- nested (2-space)', JSON.stringify(tp[4]));
   check('star items normalize to dashes', tp[5] === '- star item', tp[5]);
   check('h2 becomes a nested project', tp[6] === '\t子專案:', JSON.stringify(tp[6]));
-  check('4-space nesting becomes a tab', tp[7] === '\t- four-space nested done @done', JSON.stringify(tp[7]));
+  // The doc mixes 2- and 4-space indents, so the document-wide step is 2:
+  // 4 spaces = depth 2. (Uniform-step conversion keeps hierarchy consistent.)
+  check('4-space line in a 2-space doc is depth 2', tp[7] === '\t\t- four-space nested done @done', JSON.stringify(tp[7]));
   check('plain lines stay notes', tp[8] === 'plain note');
   check('heading with trailing colon not doubled', markdownToTaskPaper(['# A:'])[0] === 'A:');
   check('closing-hash headings are trimmed', markdownToTaskPaper(['## B ##'])[0] === '\tB:');
+
+  // The indent step is decided per DOCUMENT — a 2-space-nested list keeps
+  // its hierarchy even at depths whose spaces happen to divide by 4.
+  const deep = markdownToTaskPaper(['- a', '  - b', '    - c', '      - d']);
+  check(
+    '2-space nesting stays consistent at every depth',
+    deep.join('|') === '- a|\t- b|\t\t- c|\t\t\t- d',
+    JSON.stringify(deep),
+  );
+  // Fenced code blocks pass through untouched.
+  const fenced = markdownToTaskPaper(['```', '# install deps', '- run npm i', '```', '# Real heading']);
+  check('fence content is never rewritten', fenced[1] === '# install deps' && fenced[2] === '- run npm i', JSON.stringify(fenced));
+  check('lines after the fence convert again', fenced[4] === 'Real heading:', fenced[4]);
+}
+
+// --- selectedRootLines: covering fallback is opt-in ---
+{
+  const o = buildOutline(['A:', '\t- a1', '', '\t- a2'], 4);
+  check(
+    'blank-line range falls back to the covering branch when allowed',
+    selectedRootLines(o, [[2, 2]], true).join(',') === '1',
+    selectedRootLines(o, [[2, 2]], true).join(','),
+  );
+  check(
+    'blank-line range contributes nothing when fallback is off (Duplicate)',
+    selectedRootLines(o, [[2, 2]], false).length === 0,
+  );
+  check('direct items ignore the flag', selectedRootLines(o, [[1, 1]], false).join(',') === '1');
 }
 
 // --- tag helpers ---

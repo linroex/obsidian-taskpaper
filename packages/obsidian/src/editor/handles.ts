@@ -56,22 +56,38 @@ export function planFreeDrag(
 ): HandleDragPlan | null {
   const outline = buildOutline(lines, tabSize);
   const item = outline.items.find((i) => i.line === itemLine);
-  const target =
+  if (!item) {
+    return null;
+  }
+  // Clamp hovers over blank space to the nearest item (above the first item
+  // drops BEFORE it; past the last drops AFTER) — a null here would make the
+  // indicator vanish and the drop silently do nothing.
+  let target =
     outline.items.find((i) => i.line === targetLine) ?? itemAtLine(outline, targetLine);
-  if (!item || !target) {
+  let after = dropAfter;
+  if (!target) {
+    target = outline.items.find((i) => i.line >= targetLine);
+    if (target) {
+      after = false;
+    } else {
+      target = outline.items[outline.items.length - 1];
+      after = true;
+    }
+  }
+  if (!target) {
     return null;
   }
   if (target.line >= item.line && target.line <= item.subtreeEnd) {
     return null; // inside the dragged branch
   }
-  const edit = dropAfter
+  const edit = after
     ? moveBranchAfter(lines, item.line, target.line, tabSize)
     : moveBranchBefore(lines, item.line, target.line, tabSize);
   if (!edit) {
     return null;
   }
   return {
-    indicatorLine: dropAfter ? target.subtreeEnd + 1 : target.line,
+    indicatorLine: after ? target.subtreeEnd + 1 : target.line,
     lines: edit.lines,
     cursorLine: edit.cursorLine,
   };
@@ -217,8 +233,11 @@ class HandleDrag {
     // anywhere in the document (cross-project; re-indents to the target).
     let dropAfter = true;
     try {
+      // lineBlockAt() returns DOCUMENT coordinates; the mouse event is in
+      // SCREEN coordinates — documentTop converts between them.
       const block = this.view.lineBlockAt(pos);
-      dropAfter = block.height > 0 ? e.clientY > block.top + block.height / 2 : true;
+      const screenTop = block.top + this.view.documentTop;
+      dropAfter = block.height > 0 ? e.clientY > screenTop + block.height / 2 : true;
     } catch {
       // headless layout — keep the default
     }

@@ -168,7 +168,7 @@ export class TaskPaperCommands {
    *  bottom-up so earlier lines stay stable). */
   duplicate(view: TaskPaperView): void {
     const state = view.editor.state;
-    const roots = selectedRootLines(outlineOf(state), selectedLineRanges(state));
+    const roots = selectedRootLines(outlineOf(state), selectedLineRanges(state), false);
     if (roots.length === 0) {
       applyOutlineOp(view.editor, duplicateBranch);
       return;

@@ -119,6 +119,10 @@ export function expandSelectionRange(
 export function selectedRootLines(
   outline: Outline,
   ranges: Array<[number, number]>,
+  /** When false, a range with no item in it contributes nothing (instead of
+   *  falling back to the branch COVERING its first line) — commands like
+   *  Duplicate must stay a no-op on blank lines. */
+  coverFallback = true,
 ): number[] {
   const roots: Item[] = [];
   const covered = (line: number): boolean =>
@@ -133,7 +137,7 @@ export function selectedRootLines(
         }
       }
     }
-    if (!added) {
+    if (!added && coverFallback) {
       const item = itemAtLine(outline, start);
       if (item && !covered(item.line)) {
         roots.push(item);
