@@ -311,6 +311,24 @@ check('signature changes when file changes', sidebarSignature('a.taskpaper', 100
   check('project entries carry their name for re-resolution', b !== undefined && b.kind === 'project' && b.name === 'B');
 }
 
+// --- markdown links: [text](target) ---
+{
+  const md = findLinks('note: [Kobo page](https://kobo.com/x) end');
+  check('md link yields label + url parts', md.length === 2 && md[0].md === 'label' && md[1].md === 'url', JSON.stringify(md));
+  check('md link href is the target', md[0] !== undefined && linkHref(md[0]) === 'https://kobo.com/x');
+  check('md inner url not emitted twice', md.filter((l) => l.text.includes('kobo')).length === 1, JSON.stringify(md.map((l) => l.text)));
+
+  const scheme = findLinks('[open note](obsidian://open?vault=x)');
+  check('md link with obsidian:// target', scheme[0]?.kind === 'scheme' && linkHref(scheme[0]) === 'obsidian://open?vault=x');
+
+  const path = findLinks('[附件](./files/report.pdf)');
+  check('md link with relative path target', path[0]?.kind === 'path' && linkHref(path[0]) === 'file://./files/report.pdf');
+
+  check('plain brackets are not links', findLinks('a [not a link] b').length === 0);
+  const mixed = findLinks('[a](https://a.io) and https://b.io');
+  check('md and bare links coexist sorted', mixed.length === 3 && mixed[2].text === 'https://b.io', JSON.stringify(mixed.map((l) => l.text)));
+}
+
 // --- tag click: toggling the filter ---
 {
   const set = toggledTagFilter(null, 'today', true);

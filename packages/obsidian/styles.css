@@ -258,6 +258,12 @@ body.taskpaper-no-strike .tp-done {
   color: var(--link-external-color-hover, var(--text-accent-hover));
 }
 
+/* The `(target)` half of a markdown link — clickable but visually secondary. */
+.tp-link-md-url {
+  color: color-mix(in srgb, var(--text-normal) 45%, transparent);
+  text-decoration: none;
+}
+
 /* ---- Item handles (dot before items with children; hover-revealed) ---- */
 /* Vertical guide lines, one per outline level (original: guide-line-color =
  * tint mixed into the background at 10% light / 30% dark). Drawn on the FULL

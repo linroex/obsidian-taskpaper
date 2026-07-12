@@ -12,6 +12,10 @@ export interface LinkRange {
   kind: LinkKind;
   /** The matched text. */
   text: string;
+  /** Precomputed href (markdown links: the target, not the display text). */
+  href?: string;
+  /** Markdown-link part: 'label' = `[text]`, 'url' = `(target)` (dimmed). */
+  md?: 'label' | 'url';
 }
 
 // One alternative per link kind; order matters (url/file/www before the
@@ -25,9 +29,40 @@ const LINK_RE =
 /** Characters that end a sentence and shouldn't be swallowed into a link. */
 const TRAILING = /[.,;:!?'"”』」)>\]]+$/;
 
+/** Markdown link syntax: `[text](target)` — target without spaces/parens. */
+const MD_LINK_RE = /\[([^\[\]\n]+)\]\(([^()\s]+)\)/g;
+
+/** Classify a markdown link's target the same way bare links are classified. */
+function classifyTarget(target: string): LinkKind {
+  if (/^https?:\/\//.test(target)) return 'url';
+  if (/^file:\/\//.test(target)) return 'file';
+  if (/^www\./.test(target)) return 'www';
+  if (/^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/.test(target)) return 'email';
+  if (/^[A-Za-z][A-Za-z0-9+.-]+:/.test(target)) return 'scheme';
+  return 'path';
+}
+
 /** Find every clickable link in a single line of text (pure; testable). */
 export function findLinks(lineText: string): LinkRange[] {
   const links: LinkRange[] = [];
+
+  // Markdown links first — their spans suppress the raw-URL scan below so the
+  // target inside the parens isn't emitted twice (overlapping marks would
+  // break the decoration builder's ordering).
+  const mdSpans: { start: number; end: number }[] = [];
+  MD_LINK_RE.lastIndex = 0;
+  let md: RegExpExecArray | null;
+  while ((md = MD_LINK_RE.exec(lineText))) {
+    const target = md[2];
+    const kind = classifyTarget(target);
+    const href = linkHref({ kind, text: target });
+    const labelEnd = md.index + 1 + md[1].length + 1; // past `[text]`
+    links.push({ start: md.index, end: labelEnd, kind, text: md[1], href, md: 'label' });
+    links.push({ start: labelEnd, end: md.index + md[0].length, kind, text: target, href, md: 'url' });
+    mdSpans.push({ start: md.index, end: md.index + md[0].length });
+  }
+  const insideMd = (from: number, to: number): boolean =>
+    mdSpans.some((r) => from < r.end && to > r.start);
   // Tag ranges, so a generic `scheme:path` never swallows a tag value
   // (`@z(note:abc)` stays a clickable tag, not a link).
   let tagRanges: { start: number; end: number }[] | null = null;
@@ -80,13 +115,20 @@ export function findLinks(lineText: string): LinkRange[] {
     if (kind === 'scheme' && insideTag(m.index, m.index + text.length)) {
       continue;
     }
+    // Anything inside a markdown link is already covered by its two marks.
+    if (insideMd(m.index, m.index + text.length)) {
+      continue;
+    }
     links.push({ start: m.index, end: m.index + text.length, kind, text });
   }
-  return links;
+  return links.sort((a, b) => a.start - b.start);
 }
 
 /** The href a link opens as (pure; testable). */
-export function linkHref(link: Pick<LinkRange, 'kind' | 'text'>): string {
+export function linkHref(link: Pick<LinkRange, 'kind' | 'text' | 'href'>): string {
+  if (link.href !== undefined) {
+    return link.href;
+  }
   switch (link.kind) {
     case 'www':
       return `https://${link.text}`;
@@ -102,17 +144,28 @@ export function linkHref(link: Pick<LinkRange, 'kind' | 'text'>): string {
 
 function buildLinkDecorations(view: EditorView): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
-  for (let i = 1; i <= view.state.doc.lines; i++) {
-    const line = view.state.doc.line(i);
-    for (const link of findLinks(line.text)) {
-      builder.add(
-        line.from + link.start,
-        line.from + link.end,
-        Decoration.mark({
-          class: 'tp-link',
-          attributes: { 'data-href': linkHref(link), 'data-kind': link.kind },
-        }),
-      );
+  // Viewport-only, like the other decoration plugins.
+  const ranges =
+    view.visibleRanges.length > 0
+      ? view.visibleRanges
+      : [{ from: 0, to: view.state.doc.length }];
+  let lastLine = 0;
+  for (const { from, to } of ranges) {
+    const first = Math.max(view.state.doc.lineAt(from).number, lastLine + 1);
+    const last = view.state.doc.lineAt(to).number;
+    for (let i = first; i <= last; i++) {
+      const line = view.state.doc.line(i);
+      for (const link of findLinks(line.text)) {
+        builder.add(
+          line.from + link.start,
+          line.from + link.end,
+          Decoration.mark({
+            class: link.md === 'url' ? 'tp-link tp-link-md-url' : 'tp-link',
+            attributes: { 'data-href': linkHref(link), 'data-kind': link.kind },
+          }),
+        );
+      }
+      lastLine = i;
     }
   }
   return builder.finish();

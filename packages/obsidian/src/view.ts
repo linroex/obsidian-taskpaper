@@ -1,5 +1,5 @@
-import { setIcon, TextFileView, WorkspaceLeaf } from 'obsidian';
-import { EditorState } from '@codemirror/state';
+import { Menu, setIcon, TextFileView, WorkspaceLeaf } from 'obsidian';
+import { EditorSelection, EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { parseQuery, todayStamp } from '@taskpaper/core';
 import { outlineOf } from './editor/outline';
@@ -258,9 +258,38 @@ export class TaskPaperView extends TextFileView {
       state: EditorState.create({ doc: this.data ?? '', extensions }),
       parent: this.contentEl,
     });
+    this.registerDomEvent(this.editor.contentDOM, 'contextmenu', (e) => this.showEditorMenu(e));
     this.measureIndentUnit();
     // Fonts can finish loading after the first measurement; remeasure then.
     document.fonts?.ready.then(() => this.measureIndentUnit());
+  }
+
+  /** Right-click menu over the editor, acting on the clicked line (or the
+   *  existing selection when the click lands inside it). */
+  private showEditorMenu(e: MouseEvent): void {
+    e.preventDefault();
+    const pos = this.editor.posAtCoords({ x: e.clientX, y: e.clientY });
+    if (pos !== null) {
+      const sel = this.editor.state.selection.main;
+      if (pos < sel.from || pos > sel.to) {
+        this.editor.dispatch({ selection: EditorSelection.cursor(pos) });
+      }
+    }
+    const cmds = this.plugin.commands;
+    const menu = new Menu();
+    menu.addItem((i) => i.setTitle('Toggle done').setIcon('check').onClick(() => cmds.toggleDone(this)));
+    menu.addItem((i) => i.setTitle('Toggle today').setIcon('sun').onClick(() => cmds.toggleToday(this)));
+    menu.addItem((i) => i.setTitle('Tag with…').setIcon('tag').onClick(() => cmds.toggleTag(this)));
+    menu.addItem((i) => i.setTitle('Tag with due…').setIcon('calendar').onClick(() => cmds.tagWithDate(this, 'due')));
+    menu.addSeparator();
+    menu.addItem((i) => i.setTitle('Focus project').setIcon('target').onClick(() => cmds.focus(this)));
+    menu.addItem((i) => i.setTitle('Move to project…').setIcon('folder-input').onClick(() => cmds.moveToProject(this)));
+    menu.addItem((i) => i.setTitle('Duplicate').setIcon('copy-plus').onClick(() => cmds.duplicate(this)));
+    menu.addItem((i) => i.setTitle('Delete items').setIcon('trash').onClick(() => cmds.deleteItems(this)));
+    menu.addSeparator();
+    menu.addItem((i) => i.setTitle('Copy displayed').setIcon('clipboard-copy').onClick(() => cmds.copyDisplayed(this)));
+    menu.addItem((i) => i.setTitle('Archive done items').setIcon('archive').onClick(() => cmds.archiveDone(this)));
+    menu.showAtMouseEvent(e);
   }
 
   onResize(): void {
