@@ -228,6 +228,7 @@ export class TaskPaperSidebarView extends ItemView {
       }
       el.setAttr('title', query);
       el.onclick = (e) => ctx.select(selItem, e);
+      this.addChevron(el, null);
       return el;
     };
     for (const s of globalSearches) {
@@ -309,9 +310,7 @@ export class TaskPaperSidebarView extends ItemView {
       };
       el.addEventListener('contextmenu', (e) => this.showProjectMenu(e, ctx.view, hoistItem));
       this.registerProjectDrag(el, ctx.view, p.line);
-      if (hasChildProjects(p)) {
-        this.addChevron(el, `project:${path}`);
-      }
+      this.addChevron(el, hasChildProjects(p) ? `project:${path}` : null);
     }
   }
 
@@ -345,9 +344,7 @@ export class TaskPaperSidebarView extends ItemView {
       el.createSpan({ cls: 'tp-sb-count', text: String(count) });
       el.onclick = (e) => ctx.select(tagItem, e);
       const values = namesToValues.get(name) ?? [];
-      if (values.length > 0) {
-        this.addChevron(el, `tag:${name}`);
-      }
+      this.addChevron(el, values.length > 0 ? `tag:${name}` : null);
       if (this.isCollapsed(`tag:${name}`)) {
         continue;
       }
@@ -368,6 +365,7 @@ export class TaskPaperSidebarView extends ItemView {
           text: String(valueCounts.get(name)?.get(value) ?? 0),
         });
         vel.onclick = (e) => ctx.select(valueItem, e);
+        this.addChevron(vel, null);
       }
     }
   }
@@ -389,11 +387,17 @@ export class TaskPaperSidebarView extends ItemView {
     this.plugin.refreshSidebar();
   }
 
-  /** A chevron that folds/unfolds a row's children (persisted). */
-  private addChevron(row: HTMLElement, key: string): void {
-    const chevron = row.createSpan({ cls: 'tp-sb-chevron' });
-    setIcon(chevron, this.isCollapsed(key) ? 'chevron-right' : 'chevron-down');
+  /** A chevron that folds/unfolds a row's children (persisted). Rows without
+   *  children get an invisible spacer so every name starts at the same x. */
+  private addChevron(row: HTMLElement, key: string | null): void {
+    const chevron = row.createSpan({
+      cls: key === null ? 'tp-sb-chevron tp-sb-chevron-empty' : 'tp-sb-chevron',
+    });
     row.prepend(chevron);
+    if (key === null) {
+      return;
+    }
+    setIcon(chevron, this.isCollapsed(key) ? 'chevron-right' : 'chevron-down');
     chevron.onclick = (e) => {
       e.stopPropagation();
       this.toggleCollapsed(key);

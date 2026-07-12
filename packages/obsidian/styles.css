@@ -573,9 +573,16 @@ body.taskpaper-no-strike .tp-done {
   color: var(--text-normal);
 }
 
+/* Invisible spacer on rows without children — names align in one column. */
+.taskpaper-sidebar .tp-sb-chevron-empty {
+  visibility: hidden;
+  cursor: default;
+}
+
 /* Tag value child rows (original sidebar lists each value under its tag). */
 .taskpaper-sidebar .tp-sb-tag-value {
-  padding-left: 26px;
+  /* One level deeper than the tag name (8px row pad + 20px chevron column). */
+  padding-left: 28px;
   color: var(--tp-secondary);
   font-size: var(--font-ui-small);
 }
