@@ -16,7 +16,7 @@ import {
   Item,
   ItemKind,
   itemAtLine,
-  moveBranchToProject,
+  moveBranchesToProject,
   moveItemDown,
   moveItemOnlyDown,
   moveItemOnlyUp,
@@ -161,42 +161,104 @@ export class TaskPaperCommands {
     }).open();
   }
 
-  /** Duplicate the current item's entire branch immediately after it. */
+  /** Duplicate every selected item's branch immediately after it (processed
+   *  bottom-up so earlier lines stay stable). */
   duplicate(view: TaskPaperView): void {
-    applyOutlineOp(view.editor, duplicateBranch);
+    const state = view.editor.state;
+    const outline = outlineOf(state);
+    const roots: number[] = [];
+    for (const [start, end] of selectedLineRanges(state)) {
+      for (const item of outline.items) {
+        if (item.line >= start && item.line <= end &&
+            !roots.some((r) => {
+              const root = outline.items.find((i) => i.line === r);
+              return root !== undefined && item.line > r && item.line <= root.subtreeEnd;
+            })) {
+          roots.push(item.line);
+        }
+      }
+    }
+    if (roots.length === 0) {
+      applyOutlineOp(view.editor, duplicateBranch);
+      return;
+    }
+    let lines = docLines(state);
+    let cursorLine = 0;
+    for (const line of roots.sort((a, b) => b - a)) {
+      const step = duplicateBranch(lines, line, 4);
+      if (step) {
+        lines = step.lines;
+        cursorLine = step.cursorLine;
+      }
+    }
+    dispatchOutlineEdit(view.editor, { lines, cursorLine });
   }
 
-  /** Delete the selected item(s) including their subtrees. */
+  /** Delete the selected item(s) including their subtrees — every selection
+   *  range separately (multi-cursor selections don't delete the gap between). */
   deleteItems(view: TaskPaperView): void {
     const state = view.editor.state;
-    const [start, end] = selectedLineRange(state);
-    const result = deleteBranch(docLines(state), start, end, 4);
+    let lines = docLines(state);
+    let result = null;
+    for (const [start, end] of selectedLineRanges(state).reverse()) {
+      const step = deleteBranch(lines, start, end, 4);
+      if (step) {
+        lines = step.lines;
+        result = step;
+      }
+    }
     if (result) {
-      dispatchOutlineEdit(view.editor, result);
+      dispatchOutlineEdit(view.editor, { lines, cursorLine: result.cursorLine });
     }
   }
 
-  /** Move the current branch to the end of a picked project, as its direct child. */
+  /** Move every selected branch to the end of a picked project, as its
+   *  direct children (multi-cursor selections move each branch). */
   moveToProject(view: TaskPaperView): void {
     const state = view.editor.state;
     const outline = outlineOf(state);
-    const curLine = state.doc.lineAt(state.selection.main.head).number - 1;
-    const item = itemAtLine(outline, curLine);
-    if (!item) {
+    const itemLines: number[] = [];
+    for (const [start, end] of selectedLineRanges(state)) {
+      for (const item of outline.items) {
+        if (item.line >= start && item.line <= end) {
+          itemLines.push(item.line);
+        }
+      }
+      if (itemLines.length === 0) {
+        const item = itemAtLine(outline, start);
+        if (item) {
+          itemLines.push(item.line);
+        }
+      }
+    }
+    if (itemLines.length === 0) {
       return;
     }
-    const projects = outline.items.filter(
-      (p) => p.kind === 'project' && (p.line < item.line || p.line > item.subtreeEnd),
-    );
+    const inSelection = (p: Item): boolean =>
+      itemLines.some((ln) => {
+        const it = outline.items.find((i) => i.line === ln);
+        return it !== undefined && p.line >= it.line && p.line <= it.subtreeEnd;
+      });
+    const projects = outline.items.filter((p) => p.kind === 'project' && !inSelection(p));
     if (projects.length === 0) {
       new Notice('No projects in this document.');
       return;
     }
+    const docAtOpen = state.doc;
     new ProjectSuggestModal(
       this.plugin.app,
       projects,
       (target: Item) => {
-        const result = moveBranchToProject(docLines(view.editor.state), item.line, target.line, 4);
+        if (view.editor.state.doc !== docAtOpen) {
+          new Notice('文件已變更，未移動——請重新執行。');
+          return;
+        }
+        const result = moveBranchesToProject(
+          docLines(view.editor.state),
+          itemLines,
+          target.line,
+          4,
+        );
         if (result) {
           dispatchOutlineEdit(view.editor, result);
           view.editor.focus();
@@ -701,5 +763,26 @@ function selectedLineRange(state: EditorState): [number, number] {
     end = Math.max(end, state.doc.lineAt(range.to).number - 1);
   }
   return [start, end];
+}
+
+/** Every selection range as a merged, ascending list of 0-based line spans —
+ *  multi-cursor selections operate on each span, not the min..max hull. */
+function selectedLineRanges(state: EditorState): Array<[number, number]> {
+  const spans = state.selection.ranges
+    .map((r): [number, number] => [
+      state.doc.lineAt(r.from).number - 1,
+      state.doc.lineAt(r.to).number - 1,
+    ])
+    .sort((a, b) => a[0] - b[0]);
+  const merged: Array<[number, number]> = [];
+  for (const span of spans) {
+    const last = merged[merged.length - 1];
+    if (last && span[0] <= last[1] + 1) {
+      last[1] = Math.max(last[1], span[1]);
+    } else {
+      merged.push([span[0], span[1]]);
+    }
+  }
+  return merged;
 }
 

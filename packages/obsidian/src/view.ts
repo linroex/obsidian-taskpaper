@@ -274,8 +274,12 @@ export class TaskPaperView extends TextFileView {
       return;
     }
     e.preventDefault();
-    const sel = this.editor.state.selection.main;
-    if (pos < sel.from || pos > sel.to) {
+    // Right-clicking inside ANY selection range keeps the whole (possibly
+    // multi-range) selection so menu actions apply to all selected tasks.
+    const inSelection = this.editor.state.selection.ranges.some(
+      (r) => pos >= r.from && pos <= r.to,
+    );
+    if (!inSelection) {
       this.editor.dispatch({ selection: EditorSelection.cursor(pos) });
     }
     const cmds = this.plugin.commands;

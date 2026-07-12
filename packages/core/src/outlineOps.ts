@@ -370,6 +370,73 @@ export function moveBranchAfter(
   return moveBranchNear(lines, sourceLine, targetLine, tabSize, true);
 }
 
+/**
+ * Move SEVERAL branches (given by any line inside each) to the end of the
+ * project at `projectLine`, re-indented as its direct children, keeping their
+ * document order. Roots nested inside other selected roots are deduped.
+ * Returns null when nothing movable or the target is invalid.
+ */
+export function moveBranchesToProject(
+  lines: string[],
+  itemLines: number[],
+  projectLine: number,
+  tabSize: number,
+): OutlineEdit | null {
+  const outline = buildOutline(lines, tabSize);
+  const project = outline.items.find((i) => i.line === projectLine);
+  if (!project || project.kind !== 'project') {
+    return null;
+  }
+  // Resolve each requested line to its item, dedupe, drop nested-inside-
+  // another-selected-root and anything containing the target project.
+  const roots: Item[] = [];
+  for (const ln of [...new Set(itemLines)].sort((a, b) => a - b)) {
+    const item = outline.items.find((i) => i.line === ln) ?? itemAtLine(outline, ln);
+    if (!item) {
+      continue;
+    }
+    if (project.line >= item.line && project.line <= item.subtreeEnd) {
+      continue; // would move the target inside itself
+    }
+    if (roots.some((r) => item.line >= r.line && item.line <= r.subtreeEnd)) {
+      continue; // already covered by a selected ancestor
+    }
+    roots.push(item);
+  }
+  if (roots.length === 0) {
+    return null;
+  }
+
+  const baseIndent = (/^[\t ]*/.exec(lines[project.line])?.[0] ?? '') + '\t';
+  const byLine = new Map(outline.items.map((i) => [i.line, i] as const));
+  const block: string[] = [];
+  const removed = new Set<number>();
+  for (const root of roots) {
+    for (let ln = root.line; ln <= root.subtreeEnd; ln++) {
+      removed.add(ln);
+      const it = byLine.get(ln);
+      block.push(it ? baseIndent + '\t'.repeat(it.level - root.level) + it.text : lines[ln]);
+    }
+  }
+
+  const out: string[] = [];
+  let insertAt = -1;
+  const projectEnd = project.subtreeEnd;
+  for (let i = 0; i < lines.length; i++) {
+    if (!removed.has(i)) {
+      out.push(lines[i]);
+    }
+    if (i === projectEnd) {
+      insertAt = out.length;
+    }
+  }
+  if (insertAt < 0) {
+    return null;
+  }
+  out.splice(insertAt, 0, ...block);
+  return { lines: out, cursorLine: insertAt };
+}
+
 /** Outdent an item and its subtree one level (remove one tab, or up to tabSize spaces). */
 export function outdentItem(lines: string[], line: number, tabSize: number): OutlineEdit | null {
   const { item } = itemAt(lines, line, tabSize);

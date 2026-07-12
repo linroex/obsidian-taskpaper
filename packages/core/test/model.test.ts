@@ -17,6 +17,7 @@ import {
   duplicateBranch,
   deleteBranch,
   moveBranchToProject,
+  moveBranchesToProject,
   moveBranchBefore,
   moveBranchAfter,
 } from '../src/outlineOps';
@@ -507,6 +508,24 @@ check(
   JSON.stringify(mvSpaces?.lines),
 );
 check('move into own subtree returns null', moveBranchToProject(['One:', '\tTwo:', '\t\t- x'], 0, 1, 4) === null);
+
+// --- move SEVERAL branches to a project (multi-select right-click) ---
+{
+  const doc = ['A:', '\t- a1', '\t\t- kid', '\t- a2', 'B:', '\t- b1', 'Target:'];
+  const mv = moveBranchesToProject(doc, [1, 5], 6, 4);
+  check(
+    'moves multiple branches keeping document order',
+    mv !== null && mv.lines.join('|') === 'A:|\t- a2|B:|Target:|\t- a1|\t\t- kid|\t- b1',
+    JSON.stringify(mv?.lines),
+  );
+  const nested = moveBranchesToProject(doc, [1, 2], 6, 4);
+  check(
+    'nested roots dedupe to the outer branch',
+    nested !== null && nested.lines.filter((l) => l.includes('kid')).length === 1,
+    JSON.stringify(nested?.lines),
+  );
+  check('moving into own subtree is skipped', moveBranchesToProject(['P:', '\t- x'], [0], 0, 4) === null);
+}
 check('move to non-project returns null', moveBranchToProject(mvDoc, 4, 1, 4) === null);
 
 // --- move branch before/after (sidebar project drag-reorder) ---

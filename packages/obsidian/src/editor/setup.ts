@@ -55,6 +55,9 @@ export function createEditorExtensions(host: EditorHost): Extension[] {
   return [
     history(),
     drawSelection(),
+    // Cmd/Alt+click adds cursors/ranges — bulk right-click actions then
+    // operate on every selected task.
+    EditorState.allowMultipleSelections.of(true),
     EditorState.tabSize.of(4),
     indentUnit.of('\t'),
     // No fold gutter — the item handle dots toggle folds, like the original.
