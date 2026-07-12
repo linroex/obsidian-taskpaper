@@ -7,15 +7,7 @@
  * never spawns anything.
  */
 import { buildOutline, Outline } from './model';
-import {
-  addTag,
-  hasTag,
-  parseTags,
-  removeTag,
-  setTagValue,
-  todayStamp,
-  toggleDoneLine,
-} from './tags';
+import { addTag, hasTag, parseTags, removeTag, todayStamp, toggleDoneLine } from './tags';
 import { resolveDateExpression } from './dates';
 
 export type RepeatUnit = 'd' | 'w' | 'm' | 'y';
@@ -153,16 +145,18 @@ export function planToggleDone(
 function successorLine(text: string, rep: RepeatInterval, now: Date): string | null {
   let succ = text;
   let anchored = false;
-  for (const name of ANCHOR_TAGS) {
-    const tag = parseTags(text).find((t) => t.name === name && t.value);
-    if (!tag) {
+  // Every date-valued anchor OCCURRENCE advances in place — duplicates too,
+  // and unparseable ones stay untouched. Right-to-left keeps offsets valid.
+  for (const tag of [...parseTags(text)].reverse()) {
+    if (!(ANCHOR_TAGS as readonly string[]).includes(tag.name) || !tag.value) {
       continue;
     }
-    const resolved = resolveDateExpression(tag.value!, now);
+    const resolved = resolveDateExpression(tag.value, now);
     if (resolved === null) {
       continue;
     }
-    succ = setTagValue(succ, name, advanceDate(resolved, rep.n, rep.unit));
+    const advanced = advanceDate(resolved, rep.n, rep.unit);
+    succ = `${succ.slice(0, tag.start)}@${tag.name}(${advanced})${succ.slice(tag.end)}`;
     anchored = true;
   }
   if (hasTag(text, 'today')) {

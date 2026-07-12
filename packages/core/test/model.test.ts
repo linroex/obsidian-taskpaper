@@ -1128,6 +1128,23 @@ check('toggle from none focuses', toggleFocusTarget(null, 3) === 3);
     check('plan: unparseable @due is no anchor', plan.inserts.length === 0 && plan.notices.length === 1);
   }
 
+  // Duplicate anchor tags: each occurrence advances from its own value;
+  // unparseable duplicates stay untouched but don't block the valid one.
+  {
+    const plan = planToggleDone(['- x @due(nonsense) @due(2026-07-01) @repeat(1w)'], [0], repOpts);
+    check(
+      'plan: a valid duplicate anchor still spawns, in place',
+      plan.inserts[0]?.text === '- x @due(nonsense) @due(2026-07-08) @repeat(1w)',
+      JSON.stringify(plan.inserts),
+    );
+    const both = planToggleDone(['- x @due(2026-07-01) @due(2026-07-02) @repeat(1w)'], [0], repOpts);
+    check(
+      'plan: both duplicate anchors advance from their own values',
+      both.inserts[0]?.text === '- x @due(2026-07-08) @due(2026-07-09) @repeat(1w)',
+      JSON.stringify(both.inserts),
+    );
+  }
+
   // Toggling done OFF never spawns and never warns.
   {
     const plan = planToggleDone(['- x @due(2026-07-01) @repeat(1w) @done(2026-07-10)'], [0], repOpts);
