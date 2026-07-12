@@ -267,13 +267,16 @@ export class TaskPaperView extends TextFileView {
   /** Right-click menu over the editor, acting on the clicked line (or the
    *  existing selection when the click lands inside it). */
   private showEditorMenu(e: MouseEvent): void {
-    e.preventDefault();
     const pos = this.editor.posAtCoords({ x: e.clientX, y: e.clientY });
-    if (pos !== null) {
-      const sel = this.editor.state.selection.main;
-      if (pos < sel.from || pos > sel.to) {
-        this.editor.dispatch({ selection: EditorSelection.cursor(pos) });
-      }
+    if (pos === null) {
+      // Not over text (padding, gutter…): keep the native menu and never run
+      // line commands against a stale selection.
+      return;
+    }
+    e.preventDefault();
+    const sel = this.editor.state.selection.main;
+    if (pos < sel.from || pos > sel.to) {
+      this.editor.dispatch({ selection: EditorSelection.cursor(pos) });
     }
     const cmds = this.plugin.commands;
     const menu = new Menu();

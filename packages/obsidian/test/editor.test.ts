@@ -325,6 +325,8 @@ check('signature changes when file changes', sidebarSignature('a.taskpaper', 100
   check('md link with relative path target', path[0]?.kind === 'path' && linkHref(path[0]) === 'file://./files/report.pdf');
 
   check('plain brackets are not links', findLinks('a [not a link] b').length === 0);
+  const img = findLinks('![alt](https://img.io/a.png)');
+  check('image syntax is not an md link (inner url stays bare)', img.length === 1 && img[0].md === undefined && img[0].kind === 'url', JSON.stringify(img));
   const mixed = findLinks('[a](https://a.io) and https://b.io');
   check('md and bare links coexist sorted', mixed.length === 3 && mixed[2].text === 'https://b.io', JSON.stringify(mixed.map((l) => l.text)));
 }

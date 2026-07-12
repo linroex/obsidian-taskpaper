@@ -53,6 +53,11 @@ export function findLinks(lineText: string): LinkRange[] {
   MD_LINK_RE.lastIndex = 0;
   let md: RegExpExecArray | null;
   while ((md = MD_LINK_RE.exec(lineText))) {
+    // `![alt](url)` is image syntax, not a link — leave it as plain text.
+    // (Nested brackets in labels are a documented non-goal for a task list.)
+    if (md.index > 0 && lineText[md.index - 1] === '!') {
+      continue;
+    }
     const target = md[2];
     const kind = classifyTarget(target);
     const href = linkHref({ kind, text: target });
@@ -155,12 +160,49 @@ function buildLinkDecorations(view: EditorView): DecorationSet {
     const last = view.state.doc.lineAt(to).number;
     for (let i = first; i <= last; i++) {
       const line = view.state.doc.line(i);
-      for (const link of findLinks(line.text)) {
+      const links = findLinks(line.text);
+      for (let n = 0; n < links.length; n++) {
+        const link = links[n];
+        if (link.md === 'label') {
+          // Markdown link: `[text](target)` renders as just `text` — the
+          // syntax is hidden unless the cursor touches the link, so it stays
+          // editable in place (live-preview behavior). The url part (next
+          // entry) is consumed here.
+          const urlPart = links[n + 1];
+          const linkFrom = line.from + link.start;
+          const linkTo = line.from + (urlPart?.md === 'url' ? urlPart.end : link.end);
+          if (urlPart?.md === 'url') {
+            n++;
+          }
+          const touched = view.state.selection.ranges.some(
+            (r) => r.from <= linkTo && r.to >= linkFrom,
+          );
+          if (touched) {
+            builder.add(linkFrom, line.from + link.end, Decoration.mark({
+              class: 'tp-link',
+              attributes: { 'data-href': linkHref(link), 'data-kind': link.kind },
+            }));
+            if (urlPart?.md === 'url') {
+              builder.add(line.from + urlPart.start, line.from + urlPart.end, Decoration.mark({
+                class: 'tp-link tp-link-md-url',
+                attributes: { 'data-href': linkHref(link), 'data-kind': link.kind },
+              }));
+            }
+          } else {
+            builder.add(linkFrom, linkFrom + 1, Decoration.replace({})); // [
+            builder.add(linkFrom + 1, line.from + link.end - 1, Decoration.mark({
+              class: 'tp-link',
+              attributes: { 'data-href': linkHref(link), 'data-kind': link.kind },
+            }));
+            builder.add(line.from + link.end - 1, linkTo, Decoration.replace({})); // ](target)
+          }
+          continue;
+        }
         builder.add(
           line.from + link.start,
           line.from + link.end,
           Decoration.mark({
-            class: link.md === 'url' ? 'tp-link tp-link-md-url' : 'tp-link',
+            class: 'tp-link',
             attributes: { 'data-href': linkHref(link), 'data-kind': link.kind },
           }),
         );
@@ -178,7 +220,7 @@ const linkDecorations = ViewPlugin.fromClass(
       this.decorations = buildLinkDecorations(view);
     }
     update(update: ViewUpdate) {
-      if (update.docChanged || update.viewportChanged) {
+      if (update.docChanged || update.viewportChanged || update.selectionSet) {
         this.decorations = buildLinkDecorations(update.view);
       }
     }
