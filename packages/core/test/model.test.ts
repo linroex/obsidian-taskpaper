@@ -37,6 +37,7 @@ import {
   projectsToFold,
   toggleFocusTarget,
 } from '../src/focus';
+import { calendarModel, CalendarOccurrence } from '../src/calendar';
 
 let pass = 0;
 let fail = 0;
@@ -836,6 +837,158 @@ check('focusOutTarget top-level -> null (clear focus)', focusOutTarget(outline, 
 check('toggle same clears', toggleFocusTarget(3, 3) === null);
 check('toggle different focuses', toggleFocusTarget(3, 0) === 0);
 check('toggle from none focuses', toggleFocusTarget(null, 3) === 3);
+
+// --- calendar model ---
+// Fixed clock: Sunday 2026-07-12 (2026-07-01 is a Wednesday).
+{
+  const calToday = new Date(2026, 6, 12);
+  const calDoc = [
+    'Work:',
+    '\tRelease:',
+    '\t\t- ship it @due(2026-07-15)',                       // 2
+    '\t\t- prep @start(2026-07-10) @due(2026-07-20)',       // 3: due date only
+    '\t\t- warm up @start(2026-07-14)',                     // 4: @start alone → omitted
+    '\t- review now @today',                                // 5: virtual today
+    '\t- urgent @today @due(2026-07-18)',                   // 6: due wins, once
+    '\t- shipped @done(2026-07-10) @due(2026-07-05)',       // 7: completed only
+    '\t- late @due(2026-07-11)',                            // 8: overdue (yesterday)
+    '\t- edge @due(2026-07-12)',                            // 9: due today, NOT overdue
+    '\t- old @due(2026-06-30)',                             // 10: overdue, out of month
+    '\t- garbled @due(banana)',                             // 11: unparsable → skipped
+    '\t- soon @due(tomorrow)',                              // 12: NL → 2026-07-13
+    '\t- next month @due(2026-08-01)',                      // 13: on grid, not in agenda
+    '- loose @due(2026-07-15)',                             // 14: no project path
+    'Notes about @due(2026-07-15)',                         // 15: note → ignored
+    'Deadline @due(2026-07-16):',                           // 16: project → ignored
+  ].join('\n');
+  const calOutline = buildOutline(calDoc.split('\n'), 4);
+  const model = calendarModel(
+    calOutline,
+    '2026-07',
+    { showCompleted: true, weekStart: 0 },
+    calToday,
+  );
+  const all: CalendarOccurrence[] = [];
+  for (const week of model.weeks) {
+    for (const day of week) {
+      all.push(...day.occurrences);
+    }
+  }
+  const at = (date: string) =>
+    model.weeks.flat().find((d) => d.date === date)?.occurrences ?? [];
+  const linesAt = (date: string) => at(date).map((o) => o.line).join(',');
+
+  check('cal: month echoed', model.month === '2026-07');
+  check('cal: due lands on its date', linesAt('2026-07-15') === '2,14', linesAt('2026-07-15'));
+  check('cal: start+due → due date only', linesAt('2026-07-20') === '3', linesAt('2026-07-20'));
+  check('cal: @start alone places nothing', !all.some((o) => o.line === 4));
+  check(
+    'cal: @today without due → virtual occurrence today',
+    at('2026-07-12').some((o) => o.line === 5 && o.role === 'today'),
+    linesAt('2026-07-12'),
+  );
+  check(
+    'cal: @today with due → the due date once, role due',
+    linesAt('2026-07-18') === '6' && at('2026-07-18')[0].role === 'due' &&
+      all.filter((o) => o.line === 6).length === 1,
+  );
+  check(
+    'cal: done → completed on the done date',
+    linesAt('2026-07-10') === '7' && at('2026-07-10')[0].role === 'completed',
+  );
+  check('cal: a done item never appears as due', !at('2026-07-05').some((o) => o.line === 7));
+  check('cal: unparsable due is skipped', !all.some((o) => o.line === 11));
+  check(
+    'cal: NL @due(tomorrow) resolves against the injected today',
+    linesAt('2026-07-13') === '12',
+    linesAt('2026-07-13'),
+  );
+  check('cal: note/project @due are ignored', !all.some((o) => o.line === 15 || o.line === 16));
+  check(
+    'cal: text is stripped of tags',
+    at('2026-07-15')[0].text === 'ship it',
+    at('2026-07-15')[0].text,
+  );
+  check(
+    'cal: projectPath joins ancestor projects',
+    at('2026-07-15')[0].projectPath === 'Work / Release',
+    String(at('2026-07-15')[0].projectPath),
+  );
+  check('cal: top-level task has no projectPath', at('2026-07-15')[1].projectPath === undefined);
+
+  // Overdue: strictly before today's local midnight, sorted date then line.
+  check(
+    'cal: overdue = due yesterday and earlier, date-then-line order',
+    model.overdue.map((o) => o.line).join(',') === '10,8',
+    model.overdue.map((o) => o.line).join(','),
+  );
+  check('cal: due today is not overdue', !model.overdue.some((o) => o.line === 9));
+  check('cal: overdue items still appear on their day cell', linesAt('2026-07-11') === '8');
+
+  // Grid shape (July 2026, weekStart 0 = Sunday).
+  check('cal: 5 week rows', model.weeks.length === 5, String(model.weeks.length));
+  check('cal: rows are 7 wide', model.weeks.every((w) => w.length === 7));
+  check(
+    'cal: grid starts Sunday 06-28, padded out-of-month',
+    model.weeks[0][0].date === '2026-06-28' && !model.weeks[0][0].inMonth,
+    model.weeks[0][0].date,
+  );
+  check(
+    'cal: grid ends Saturday 08-01, padded out-of-month',
+    model.weeks[4][6].date === '2026-08-01' && !model.weeks[4][6].inMonth,
+    model.weeks[4][6].date,
+  );
+  check('cal: July 1 is in-month', at('2026-07-01') !== undefined && model.weeks[0][3].inMonth);
+  check(
+    'cal: padding days still carry occurrences',
+    linesAt('2026-08-01') === '13' && linesAt('2026-06-30') === '10',
+  );
+
+  // Agenda: ascending in-month dates with occurrences; overdue excluded.
+  check(
+    'cal: agenda dates ascend within the month',
+    model.agenda.map((a) => a.date).join(',') ===
+      '2026-07-10,2026-07-12,2026-07-13,2026-07-15,2026-07-18,2026-07-20',
+    model.agenda.map((a) => a.date).join(','),
+  );
+  check(
+    'cal: agenda excludes overdue occurrences',
+    !model.agenda.some((a) => a.occurrences.some((o) => o.line === 8 || o.line === 10)),
+  );
+  check(
+    'cal: agenda excludes out-of-month dates',
+    !model.agenda.some((a) => a.date === '2026-08-01'),
+  );
+  check(
+    'cal: due-today sits in the agenda, not overdue',
+    model.agenda.find((a) => a.date === '2026-07-12')!.occurrences.some((o) => o.line === 9),
+  );
+
+  // showCompleted off: the done item disappears entirely.
+  const hidden = calendarModel(
+    calOutline,
+    '2026-07',
+    { showCompleted: false, weekStart: 0 },
+    calToday,
+  );
+  check(
+    'cal: showCompleted=false drops completed occurrences',
+    !hidden.weeks.flat().some((d) => d.occurrences.some((o) => o.role === 'completed')),
+  );
+
+  // weekStart 1 (Monday) re-pads the same month.
+  const mon = calendarModel(calOutline, '2026-07', { showCompleted: true, weekStart: 1 }, calToday);
+  check(
+    'cal: weekStart=1 grid starts Monday 06-29',
+    mon.weeks[0][0].date === '2026-06-29',
+    mon.weeks[0][0].date,
+  );
+  check(
+    'cal: weekStart=1 grid ends Sunday 08-02',
+    mon.weeks.length === 5 && mon.weeks[4][6].date === '2026-08-02',
+    mon.weeks[4][6].date,
+  );
+}
 
 function setEq(a: Set<number>, b: Set<number>): boolean {
   if (a.size !== b.size) {
