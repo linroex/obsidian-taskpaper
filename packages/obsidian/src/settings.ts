@@ -11,6 +11,8 @@ export interface TaskPaperSettings {
   removeExtraTagsWhenArchiving: boolean;
   strikeDoneItems: boolean;
   filterHidesInsteadOfDims: boolean;
+  /** First day of the calendar week: 1 = Monday, 0 = Sunday. */
+  calendarWeekStart: number;
   /** Saved searches shown in the sidebar for every document (TaskPaper's searches.taskpaper). */
   globalSearches: GlobalSearch[];
   /** Tags always shown in the sidebar even at count 0 — space/comma separated, '@' optional. Empty = show all found tags. */
@@ -26,6 +28,7 @@ export const DEFAULT_SETTINGS: TaskPaperSettings = {
   removeExtraTagsWhenArchiving: false,
   strikeDoneItems: true,
   filterHidesInsteadOfDims: true,
+  calendarWeekStart: 1,
   globalSearches: [
     { name: 'Today', query: '@today' },
     { name: 'Not Done', query: 'not @done' },
@@ -102,6 +105,21 @@ export class TaskPaperSettingTab extends PluginSettingTab {
           this.plugin.settings.filterHidesInsteadOfDims = v;
           await this.plugin.saveSettings();
         }),
+      );
+
+    new Setting(containerEl)
+      .setName('行事曆：每週起始日')
+      .setDesc('行事曆檢視的一週從哪一天開始。')
+      .addDropdown((d) =>
+        d
+          .addOption('1', '週一')
+          .addOption('0', '週日')
+          .setValue(String(this.plugin.settings.calendarWeekStart))
+          .onChange(async (v) => {
+            this.plugin.settings.calendarWeekStart = Number(v);
+            await this.plugin.saveSettings();
+            this.plugin.refreshSidebar();
+          }),
       );
 
     this.displayGlobalSearches(containerEl);

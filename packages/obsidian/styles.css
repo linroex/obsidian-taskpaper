@@ -19,6 +19,23 @@
   font-family: var(--font-text);
 }
 
+/* Embedded calendar: editor ⇄ calendar toggle in the SAME tab. */
+.taskpaper-view .tp-cal-embedded {
+  display: none;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.taskpaper-view.is-calendar-mode .tp-cal-embedded {
+  display: block;
+}
+
+.taskpaper-view.is-calendar-mode .cm-editor,
+.taskpaper-view.is-calendar-mode .tp-searchbar {
+  display: none;
+}
+
 /* The original app's searchbar: shown while a filter is active. */
 .tp-searchbar {
   display: flex;

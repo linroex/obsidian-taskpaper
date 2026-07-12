@@ -1,16 +1,14 @@
 /**
- * E2E tests for the calendar view: the REAL TaskPaperCalendarView renders
- * into a jsdom DOM (the 'obsidian' module is aliased to test/stubs/obsidian.ts),
- * wired to a REAL EditorView mounted with the production extension stack via
- * the e2e harness. A minimal fake plugin/lastActiveView stands in for the
- * Obsidian app, and the view's injectable clock pins "today" to Sunday
- * 2026-07-12 so date placement is deterministic.
+ * E2E tests for the calendar pane (embedded editor ⇄ calendar mode): the REAL
+ * CalendarPane renders into a jsdom DOM (the 'obsidian' module is aliased to
+ * test/stubs/obsidian.ts), wired to a REAL EditorView mounted with the
+ * production extension stack via the e2e harness. The pane's injectable clock
+ * pins "today" to Sunday 2026-07-12 so date placement is deterministic.
  */
 import { docText, mountEditor } from './e2eHarness';
-import { Notice, TFile, WorkspaceLeaf } from 'obsidian';
-import { TaskPaperCalendarView } from '../src/calendarView';
-import type TaskPaperPlugin from '../src/main';
-import type { TaskPaperView } from '../src/view';
+import { Notice } from 'obsidian';
+import { EditorSelection } from '@codemirror/state';
+import { CalendarPane } from '../src/calendarPane';
 
 let pass = 0;
 let fail = 0;
@@ -36,28 +34,27 @@ const DOC = [
   '- loose @due(2026-08-02)', // line 6: next month
 ].join('\n');
 
-/** Mount a real editor + the real calendar view around a minimal fake plugin. */
+/** Mount a real editor + the real calendar pane around a minimal host. */
 function mountCalendar(doc: string) {
   const mounted = mountEditor(doc);
-  const leaf = new WorkspaceLeaf();
-  const fakeView = {
-    editor: mounted.view,
-    file: new TFile(),
-    leaf,
-  } as unknown as TaskPaperView;
-  const plugin = {
-    settings: {},
-    lastActiveView: fakeView,
-    refreshSidebar: () => calendar.render(true),
-    refreshSidebarSoon: () => {},
-  } as unknown as TaskPaperPlugin;
-  const calendar = new TaskPaperCalendarView(new WorkspaceLeaf(), plugin);
+  const root = document.body.createDiv();
+  const jumps: number[] = [];
+  const calendar = new CalendarPane(root, {
+    state: () => mounted.view.state,
+    weekStart: () => 1,
+    jumpToLine: (line) => {
+      jumps.push(line);
+      mounted.view.dispatch({
+        selection: EditorSelection.cursor(mounted.view.state.doc.line(line + 1).from),
+        scrollIntoView: true,
+      });
+    },
+  });
   calendar.now = () => TODAY;
-  calendar.render(true);
-  const root = calendar.contentEl;
+  calendar.setActive(true);
   return {
     calendar,
-    view: fakeView,
+    jumps,
     editor: mounted.view,
     root,
     cell: (date: string) => root.querySelector<HTMLElement>(`.tp-cal-day[data-date="${date}"]`),
@@ -76,7 +73,6 @@ function textOf(occ: HTMLElement): string {
 {
   const fx = mountCalendar(DOC);
   check('month label shows the anchor month', fx.root.textContent!.includes('2026年7月'));
-  check('header shows the source file basename', fx.root.textContent!.includes('test'));
   check(
     'weekday header starts Monday (一)',
     fx.root.querySelector('.tp-cal-weekday')?.textContent === '一',
@@ -223,22 +219,22 @@ function textOf(occ: HTMLElement): string {
   fx.cleanup();
 }
 
-// --- empty state without an active TaskPaper view ---
+// --- inactive panes skip rendering entirely (hidden = zero work) ---
 {
-  const plugin = {
-    settings: {},
-    lastActiveView: null,
-    refreshSidebar: () => {},
-    refreshSidebarSoon: () => {},
-  } as unknown as TaskPaperPlugin;
-  const calendar = new TaskPaperCalendarView(new WorkspaceLeaf(), plugin);
-  calendar.now = () => TODAY;
-  calendar.render(true);
-  check(
-    'no active view renders the empty prompt',
-    calendar.contentEl.textContent === '開啟一個 .taskpaper 檔案',
-    calendar.contentEl.textContent ?? '',
-  );
+  const mounted = mountEditor('- x @due(2026-07-15)');
+  const root = document.body.createDiv();
+  const pane = new CalendarPane(root, {
+    state: () => mounted.view.state,
+    weekStart: () => 1,
+    jumpToLine: () => {},
+  });
+  pane.now = () => TODAY;
+  pane.render(true);
+  check('inactive pane renders nothing', root.querySelector('.tp-cal-grid') === null);
+  pane.setActive(true);
+  check('activation renders the grid', root.querySelector('.tp-cal-grid') !== null);
+  pane.setActive(false);
+  mounted.cleanup();
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

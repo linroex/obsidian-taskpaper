@@ -1,11 +1,7 @@
-import { ItemView, Notice, setIcon, WorkspaceLeaf } from 'obsidian';
-import { EditorSelection } from '@codemirror/state';
+import { Notice, setIcon } from 'obsidian';
+import type { EditorState } from '@codemirror/state';
 import { calendarModel, CalendarModel, CalendarOccurrence, removeAllTags } from '@taskpaper/core';
 import { outlineOf } from './editor/outline';
-import type TaskPaperPlugin from './main';
-import type { TaskPaperView } from './view';
-
-export const VIEW_TYPE_CALENDAR = 'taskpaper-calendar';
 
 /** Weekday glyph by Date#getDay() index. */
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
@@ -27,56 +23,54 @@ function shiftMonth(anchor: string, n: number): string {
   return isoMonth(new Date(y, m - 1 + n, 1));
 }
 
+/** What the embedded calendar needs from its owner (the TaskPaper view). */
+export interface CalendarHost {
+  /** The source document's current editor state. */
+  state(): EditorState;
+  /** Move the editor to a 0-based line (the pane has already verified it). */
+  jumpToLine(line: number): void;
+  /** First day of the week: 1 = Monday, 0 = Sunday (user setting). */
+  weekStart(): number;
+}
+
 /**
- * A main-workspace calendar over the active document's dated tasks: a month
- * grid or an agenda list, fed from plugin.lastActiveView like the sidebar.
+ * The calendar pane embedded INSIDE the TaskPaper view (editor ⇄ calendar
+ * toggle in the same tab): a month grid or an agenda list over the
+ * document's dated tasks.
  */
-export class TaskPaperCalendarView extends ItemView {
-  /** 月曆格 (grid) ⇄ 列表 (agenda) — kept on the instance for the view's lifetime. */
+export class CalendarPane {
+  /** 月曆格 (grid) ⇄ 列表 (agenda) — kept for the pane's lifetime. */
   private mode: 'month' | 'agenda' = 'month';
   private showCompleted = false;
   /** YYYY-MM being displayed; defaults to today's month on first render. */
   private monthAnchor: string | null = null;
-  /** First day of the week (1 = Monday, matching the 一二三四五六日 header). */
-  private weekStart = 1;
   /** Injectable clock, so tests can pin "today". */
   now: () => Date = () => new Date();
-  /** The view + content signature last rendered, to avoid needless DOM rebuilds. */
+  /** Signature of the last render, to avoid needless DOM rebuilds. */
   private renderedSignature: string | null = null;
+  private midnightTimer: number | null = null;
+  private active = false;
 
   constructor(
-    leaf: WorkspaceLeaf,
-    private plugin: TaskPaperPlugin,
-  ) {
-    super(leaf);
-  }
+    private containerEl: HTMLElement,
+    private host: CalendarHost,
+  ) {}
 
-  getViewType(): string {
-    return VIEW_TYPE_CALENDAR;
-  }
-
-  getDisplayText(): string {
-    return 'TaskPaper 行事曆';
-  }
-
-  getIcon(): string {
-    return 'calendar-days';
-  }
-
-  private midnightTimer: number | null = null;
-
-  async onOpen(): Promise<void> {
-    this.render(true);
-    this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.render()));
-    this.scheduleMidnightRefresh();
-  }
-
-  async onClose(): Promise<void> {
-    if (this.midnightTimer !== null) {
+  /** Show/hide bookkeeping: renders on activation, times the midnight rollover. */
+  setActive(active: boolean): void {
+    this.active = active;
+    if (active) {
+      this.render(true);
+      this.scheduleMidnightRefresh();
+    } else if (this.midnightTimer !== null) {
       window.clearTimeout(this.midnightTimer);
       this.midnightTimer = null;
     }
-    this.contentEl.empty();
+  }
+
+  destroy(): void {
+    this.setActive(false);
+    this.containerEl.empty();
   }
 
   /** Re-render right after local midnight (今天 highlight, @today items and
@@ -98,57 +92,51 @@ export class TaskPaperCalendarView extends ItemView {
   }
 
   render(force = false): void {
-    const view = this.plugin.lastActiveView;
+    if (!this.active) {
+      return; // hidden pane — the next setActive(true) does a full render
+    }
+    const state = this.host.state();
     const today = this.now();
     if (this.monthAnchor === null) {
       this.monthAnchor = isoMonth(today);
     }
-    const signature =
-      view && view.editor
-        ? [
-            view.file?.path ?? '?',
-            view.editor.state.doc.length,
-            this.monthAnchor,
-            this.mode,
-            this.showCompleted,
-            isoDate(today),
-          ].join('|')
-        : `empty|${this.mode}`;
+    const weekStart = this.host.weekStart();
+    const signature = [
+      state.doc.length,
+      this.monthAnchor,
+      this.mode,
+      this.showCompleted,
+      weekStart,
+      isoDate(today),
+    ].join('|');
     if (!force && signature === this.renderedSignature) {
       return;
     }
     this.renderedSignature = signature;
 
-    const container = this.contentEl;
+    const container = this.containerEl;
     container.empty();
     container.addClass('taskpaper-calendar');
 
-    if (!view || !view.editor) {
-      container.createDiv({ cls: 'tp-cal-empty', text: '開啟一個 .taskpaper 檔案' });
-      return;
-    }
-
     const model = calendarModel(
-      outlineOf(view.editor.state),
+      outlineOf(state),
       this.monthAnchor,
-      { showCompleted: this.showCompleted, weekStart: this.weekStart },
+      { showCompleted: this.showCompleted, weekStart },
       today,
     );
     const todayStr = isoDate(today);
 
-    this.renderToolbar(container, view);
+    this.renderToolbar(container);
     if (this.mode === 'month') {
-      this.renderMonthGrid(container, view, model, todayStr);
+      this.renderMonthGrid(container, model, todayStr);
     } else {
-      this.renderAgenda(container, view, model, todayStr);
+      this.renderAgenda(container, model, todayStr);
     }
   }
 
-  /** Header (source file) + toolbar: ‹ 今天 › · month · mode toggle · 顯示已完成. */
-  private renderToolbar(container: HTMLElement, view: TaskPaperView): void {
+  /** Toolbar: ‹ 今天 › · month · mode toggle · 顯示已完成. */
+  private renderToolbar(container: HTMLElement): void {
     const header = container.createDiv({ cls: 'tp-cal-header' });
-    header.createDiv({ cls: 'tp-cal-file', text: view.file?.basename ?? 'TaskPaper' });
-
     const toolbar = header.createDiv({ cls: 'tp-cal-toolbar' });
     const navBtn = (cls: string, icon: string, label: string, onClick: () => void) => {
       const btn = toolbar.createEl('button', { cls: `tp-cal-btn ${cls}`, attr: { 'aria-label': label } });
@@ -204,7 +192,6 @@ export class TaskPaperCalendarView extends ItemView {
   /** A clickable occurrence row: colored dot + tag-stripped title. */
   private renderOccurrence(
     parent: HTMLElement,
-    view: TaskPaperView,
     occ: CalendarOccurrence,
     todayStr: string,
     breadcrumb: string | undefined,
@@ -216,18 +203,14 @@ export class TaskPaperCalendarView extends ItemView {
       el.createSpan({ cls: 'tp-cal-occ-path', text: breadcrumb });
     }
     el.setAttr('title', occ.projectPath ? `${occ.text} — ${occ.projectPath}` : occ.text);
-    el.onclick = () => this.openOccurrence(view, occ);
+    el.onclick = () => this.openOccurrence(occ);
   }
 
-  private renderMonthGrid(
-    container: HTMLElement,
-    view: TaskPaperView,
-    model: CalendarModel,
-    todayStr: string,
-  ): void {
+  private renderMonthGrid(container: HTMLElement, model: CalendarModel, todayStr: string): void {
+    const weekStart = this.host.weekStart();
     const grid = container.createDiv({ cls: 'tp-cal-grid' });
     for (let i = 0; i < 7; i++) {
-      grid.createDiv({ cls: 'tp-cal-weekday', text: WEEKDAYS[(this.weekStart + i) % 7] });
+      grid.createDiv({ cls: 'tp-cal-weekday', text: WEEKDAYS[(weekStart + i) % 7] });
     }
     const maxShown = 3;
     for (const week of model.weeks) {
@@ -242,7 +225,7 @@ export class TaskPaperCalendarView extends ItemView {
         const cell = grid.createDiv({ cls, attr: { 'data-date': day.date } });
         cell.createDiv({ cls: 'tp-cal-day-num', text: String(Number(day.date.slice(8))) });
         for (const occ of day.occurrences.slice(0, maxShown)) {
-          this.renderOccurrence(cell, view, occ, todayStr, undefined);
+          this.renderOccurrence(cell, occ, todayStr, undefined);
         }
         if (day.occurrences.length > maxShown) {
           cell.createDiv({ cls: 'tp-cal-more', text: `+${day.occurrences.length - maxShown}` });
@@ -267,12 +250,7 @@ export class TaskPaperCalendarView extends ItemView {
     return heading;
   }
 
-  private renderAgenda(
-    container: HTMLElement,
-    view: TaskPaperView,
-    model: CalendarModel,
-    todayStr: string,
-  ): void {
+  private renderAgenda(container: HTMLElement, model: CalendarModel, todayStr: string): void {
     const list = container.createDiv({ cls: 'tp-cal-agenda' });
     if (model.overdue.length > 0) {
       const section = list.createDiv({ cls: 'tp-cal-section tp-cal-overdue' });
@@ -282,7 +260,6 @@ export class TaskPaperCalendarView extends ItemView {
         const when = `${m}月${d}日`;
         this.renderOccurrence(
           section,
-          view,
           occ,
           todayStr,
           occ.projectPath ? `${when} · ${occ.projectPath}` : when,
@@ -300,14 +277,14 @@ export class TaskPaperCalendarView extends ItemView {
         text: this.dateHeading(entry.date, todayStr),
       });
       for (const occ of entry.occurrences) {
-        this.renderOccurrence(section, view, occ, todayStr, occ.projectPath);
+        this.renderOccurrence(section, occ, todayStr, occ.projectPath);
       }
     }
   }
 
   /** Jump to the occurrence's source line — unless the document has drifted. */
-  private openOccurrence(view: TaskPaperView, occ: CalendarOccurrence): void {
-    const doc = view.editor.state.doc;
+  private openOccurrence(occ: CalendarOccurrence): void {
+    const doc = this.host.state().doc;
     // Staleness guard: rebuild the line's tag-stripped fingerprint and require
     // EXACT equality — a substring check could accept a different task whose
     // title merely contains the old one, and empty titles bypassed it.
@@ -321,11 +298,6 @@ export class TaskPaperCalendarView extends ItemView {
       this.render(true);
       return;
     }
-    this.app.workspace.revealLeaf(view.leaf);
-    view.editor.dispatch({
-      selection: EditorSelection.cursor(doc.line(occ.line + 1).from),
-      scrollIntoView: true,
-    });
-    view.editor.focus();
+    this.host.jumpToLine(occ.line);
   }
 }

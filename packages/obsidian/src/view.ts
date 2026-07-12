@@ -5,6 +5,7 @@ import { parseQuery, todayStamp } from '@taskpaper/core';
 import { outlineOf } from './editor/outline';
 import { filterSpecField, searchbarText, setFilterEffect } from './editor/filter';
 import { createEditorExtensions } from './editor/setup';
+import { CalendarPane } from './calendarPane';
 import type { SidebarSelectionItem } from './sidebarLogic';
 import type { LinkKind } from './editor/links';
 import type TaskPaperPlugin from './main';
@@ -21,6 +22,11 @@ export class TaskPaperView extends TextFileView {
   private applyingExternalData = false;
   private searchbarEl!: HTMLElement;
   private searchInput!: HTMLInputElement;
+  /** editor ⇄ calendar, toggled in place within the same tab. */
+  viewMode: 'editor' | 'calendar' = 'editor';
+  private calendarEl!: HTMLElement;
+  calendarPane!: CalendarPane;
+  private calendarAction: HTMLElement | null = null;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -44,8 +50,12 @@ export class TaskPaperView extends TextFileView {
   async onOpen(): Promise<void> {
     this.buildSearchbar();
     this.buildEditor();
+    this.buildCalendar();
     this.plugin.lastActiveView = this;
     this.plugin.refreshSidebar();
+    this.calendarAction = this.addAction('calendar-days', '切換行事曆檢視', () =>
+      this.toggleCalendarMode(),
+    );
     this.addAction('archive', 'Archive done items', () =>
       this.plugin.commands.archiveDone(this),
     );
@@ -53,7 +63,56 @@ export class TaskPaperView extends TextFileView {
 
   async onClose(): Promise<void> {
     this.saveNow();
+    this.calendarPane?.destroy();
     this.editor?.destroy();
+  }
+
+  /** The embedded calendar container (hidden while in editor mode). */
+  private buildCalendar(): void {
+    this.calendarEl = this.contentEl.createDiv({ cls: 'taskpaper-calendar tp-cal-embedded' });
+    this.calendarPane = new CalendarPane(this.calendarEl, {
+      state: () => this.editor.state,
+      weekStart: () => this.plugin.settings.calendarWeekStart,
+      jumpToLine: (line) => {
+        this.setViewMode('editor');
+        this.editor.dispatch({
+          selection: EditorSelection.cursor(this.editor.state.doc.line(line + 1).from),
+          scrollIntoView: true,
+        });
+        this.editor.focus();
+      },
+    });
+  }
+
+  /** Toggle editor ⇄ calendar in the SAME tab (like markdown's reading mode). */
+  toggleCalendarMode(): void {
+    this.setViewMode(this.viewMode === 'editor' ? 'calendar' : 'editor');
+  }
+
+  setViewMode(mode: 'editor' | 'calendar'): void {
+    if (mode === this.viewMode) {
+      return;
+    }
+    this.viewMode = mode;
+    this.contentEl.toggleClass('is-calendar-mode', mode === 'calendar');
+    this.calendarPane.setActive(mode === 'calendar');
+    if (this.calendarAction) {
+      setIcon(this.calendarAction, mode === 'calendar' ? 'pencil' : 'calendar-days');
+      this.calendarAction.setAttribute(
+        'aria-label',
+        mode === 'calendar' ? '切換編輯檢視' : '切換行事曆檢視',
+      );
+    }
+    if (mode === 'editor') {
+      this.editor.focus();
+    }
+  }
+
+  /** Re-render the embedded calendar when it is the active mode. */
+  refreshCalendar(): void {
+    if (this.viewMode === 'calendar') {
+      this.calendarPane.render(true);
+    }
   }
 
   /** The original app's searchbar, permanently visible above the editor
