@@ -69,7 +69,10 @@ export class TaskPaperView extends TextFileView {
 
   /** The embedded calendar container (hidden while in editor mode). */
   private buildCalendar(): void {
-    this.calendarEl = this.contentEl.createDiv({ cls: 'taskpaper-calendar tp-cal-embedded' });
+    this.calendarEl = this.contentEl.createDiv({
+      cls: 'taskpaper-calendar tp-cal-embedded',
+      attr: { tabindex: '-1' },
+    });
     this.calendarPane = new CalendarPane(this.calendarEl, {
       state: () => this.editor.state,
       weekStart: () => this.plugin.settings.calendarWeekStart,
@@ -96,6 +99,12 @@ export class TaskPaperView extends TextFileView {
     this.viewMode = mode;
     this.contentEl.toggleClass('is-calendar-mode', mode === 'calendar');
     this.calendarPane.setActive(mode === 'calendar');
+    if (mode === 'calendar') {
+      // The hidden CodeMirror must not keep keyboard focus — typing would
+      // still edit the document invisibly.
+      this.editor.contentDOM.blur();
+      this.calendarEl.focus();
+    }
     if (this.calendarAction) {
       setIcon(this.calendarAction, mode === 'calendar' ? 'pencil' : 'calendar-days');
       this.calendarAction.setAttribute(
@@ -400,6 +409,8 @@ export class TaskPaperView extends TextFileView {
       effects: setFilterEffect.of(null),
     });
     this.applyingExternalData = false;
+    // External reloads bypass onDocChanged — keep an active calendar current.
+    this.refreshCalendar();
   }
 
   clear(): void {

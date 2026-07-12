@@ -199,6 +199,9 @@ export default class TaskPaperPlugin extends Plugin {
       callback: () => this.activateSidebar(),
     });
     cmd('toggle-calendar-view', 'Toggle calendar view', (v) => v.toggleCalendarMode());
+    // Compatibility alias: 'open-calendar' predates the in-tab calendar mode;
+    // existing user hotkeys keep working.
+    cmd('open-calendar', 'Open calendar', (v) => v.setViewMode('calendar'));
   }
 
   async loadSettings(): Promise<void> {
