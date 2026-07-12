@@ -7,6 +7,7 @@ export * from './analysis';
 export * from './archive';
 export * from './convert';
 export * from './calendar';
+export * from './capture';
 export * from './focus';
 export * from './query/lexer';
 export * from './query/parser';

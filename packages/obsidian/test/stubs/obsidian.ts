@@ -181,7 +181,7 @@ export class Workspace {
     return null;
   }
   getLeavesOfType(_type: string): WorkspaceLeaf[] {
-    return [];
+    return this.leaves;
   }
   getRightLeaf(_split: boolean): WorkspaceLeaf | null {
     return new WorkspaceLeaf();
@@ -191,6 +191,36 @@ export class Workspace {
 
 export class Vault {
   adapter: Record<string, unknown> = {};
+  /** In-memory file tree: path -> TFile/TFolder, path -> content. */
+  files = new Map<string, TFile>();
+  folders = new Map<string, TFolder>();
+  contents = new Map<string, string>();
+  /** Recorded create/createFolder calls, in order. */
+  created: string[] = [];
+  createdFolders: string[] = [];
+
+  getAbstractFileByPath(path: string): TFile | TFolder | null {
+    return this.files.get(path) ?? this.folders.get(path) ?? null;
+  }
+  async create(path: string, data: string): Promise<TFile> {
+    const base = path.split('/').pop() ?? path;
+    const file = new TFile(path, base.replace(/\.[^.]+$/, ''), base.split('.').pop() ?? '');
+    this.files.set(path, file);
+    this.contents.set(path, data);
+    this.created.push(path);
+    return file;
+  }
+  async createFolder(path: string): Promise<TFolder> {
+    const folder = new TFolder(path);
+    this.folders.set(path, folder);
+    this.createdFolders.push(path);
+    return folder;
+  }
+  async process(file: TFile, fn: (data: string) => string): Promise<string> {
+    const next = fn(this.contents.get(file.path) ?? '');
+    this.contents.set(file.path, next);
+    return next;
+  }
 }
 
 export class App {

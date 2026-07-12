@@ -259,6 +259,20 @@ body.taskpaper-no-strike .tp-done {
   min-height: 1.2em;
 }
 
+/* ---- Quick capture modal ---- */
+.tp-capture-target {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  margin-top: var(--size-4-2);
+}
+
+.tp-capture-preview {
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+  min-height: 1.4em;
+  margin-top: var(--size-4-1);
+}
+
 /* ---- "Tag with…" multi-select modal ---- */
 .tp-tag-multi-hint {
   color: var(--text-muted);

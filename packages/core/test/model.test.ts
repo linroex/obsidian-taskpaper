@@ -39,6 +39,7 @@ import {
   toggleFocusTarget,
 } from '../src/focus';
 import { calendarModel, CalendarOccurrence } from '../src/calendar';
+import { normalizeCaptureText, planCapture } from '../src/capture';
 
 let pass = 0;
 let fail = 0;
@@ -1045,6 +1046,107 @@ check('toggle from none focuses', toggleFocusTarget(null, 3) === 3);
     'cal: weekStart=1 grid ends Sunday 08-02',
     mon.weeks.length === 5 && mon.weeks[4][6].date === '2026-08-02',
     mon.weeks[4][6].date,
+  );
+}
+
+// --- quick capture: planCapture + normalizeCaptureText ---
+{
+  const apply = (doc: string, task: string, path: string): string => {
+    const ls = doc.split('\n');
+    const plan = planCapture(ls, task, path, 4);
+    ls.splice(plan.insertLine, 0, ...plan.insertText.split('\n'));
+    return ls.join('\n');
+  };
+
+  // Empty project path → append at document end, preserving the trailing newline.
+  check(
+    'capture: empty path appends at end (trailing newline kept)',
+    apply('A:\n\t- a\n', '- x', '') === 'A:\n\t- a\n- x\n',
+    JSON.stringify(apply('A:\n\t- a\n', '- x', '')),
+  );
+  check(
+    'capture: empty path appends at end (no trailing newline stays absent)',
+    apply('A:\n\t- a', '- x', '') === 'A:\n\t- a\n- x',
+    JSON.stringify(apply('A:\n\t- a', '- x', '')),
+  );
+  check(
+    'capture: empty document gains the task plus a trailing newline',
+    apply('', '- x', '') === '- x\n',
+    JSON.stringify(apply('', '- x', '')),
+  );
+
+  // Existing project: task lands as the LAST direct child, after the whole subtree.
+  const projDoc = 'Inbox:\n\t- a\n\t\t- a.1\n\t- b\nWork:\n\t- c\n';
+  check(
+    'capture: existing project inserts after its entire subtree',
+    apply(projDoc, '- x', 'Inbox') === 'Inbox:\n\t- a\n\t\t- a.1\n\t- b\n\t- x\nWork:\n\t- c\n',
+    JSON.stringify(apply(projDoc, '- x', 'Inbox')),
+  );
+
+  // Blank separator lines after the subtree stay after the inserted task.
+  const blankDoc = 'Inbox:\n\t- a\n\nWork:\n\t- c\n';
+  check(
+    'capture: insertion goes before the blank separator line',
+    apply(blankDoc, '- x', 'Inbox') === 'Inbox:\n\t- a\n\t- x\n\nWork:\n\t- c\n',
+    JSON.stringify(apply(blankDoc, '- x', 'Inbox')),
+  );
+
+  // Nested path with a duplicate leaf name: the exact path disambiguates.
+  const dupDoc = '收件匣:\n\t- top\nWork:\n\t收件匣:\n\t\t- nested\n';
+  check(
+    'capture: top-level path picks the top-level duplicate',
+    apply(dupDoc, '- x', '收件匣') === '收件匣:\n\t- top\n\t- x\nWork:\n\t收件匣:\n\t\t- nested\n',
+    JSON.stringify(apply(dupDoc, '- x', '收件匣')),
+  );
+  check(
+    'capture: nested path picks the nested duplicate, one level deeper',
+    apply(dupDoc, '- x', 'Work/收件匣') ===
+      '收件匣:\n\t- top\nWork:\n\t收件匣:\n\t\t- nested\n\t\t- x\n',
+    JSON.stringify(apply(dupDoc, '- x', 'Work/收件匣')),
+  );
+
+  // Missing project: the whole chain is created at the document end.
+  check(
+    'capture: missing project chain is created at document end',
+    apply('Other:\n\t- a\n', '- x', 'Work/收件匣') ===
+      'Other:\n\t- a\nWork:\n\t收件匣:\n\t\t- x\n',
+    JSON.stringify(apply('Other:\n\t- a\n', '- x', 'Work/收件匣')),
+  );
+  // Partially missing: the deepest existing prefix is reused, not duplicated.
+  check(
+    'capture: existing path prefix is reused for the missing tail',
+    apply('Work:\n\t- a\nOther:\n', '- x', 'Work/收件匣') ===
+      'Work:\n\t- a\n\t收件匣:\n\t\t- x\nOther:\n',
+    JSON.stringify(apply('Work:\n\t- a\nOther:\n', '- x', 'Work/收件匣')),
+  );
+
+  // Project names match with their tags stripped.
+  check(
+    'capture: project tags are ignored when matching the path',
+    apply('Work: @flag\n', '- x', 'Work') === 'Work: @flag\n\t- x\n',
+    JSON.stringify(apply('Work: @flag\n', '- x', 'Work')),
+  );
+
+  // normalizeCaptureText: marker prefix + date-tag resolution.
+  const capNow = new Date(2026, 6, 8); // 2026-07-08 local
+  check('capture: bare text gets the - prefix', normalizeCaptureText('買牛奶') === '- 買牛奶');
+  check('capture: existing task marker is kept', normalizeCaptureText('- a') === '- a');
+  check('capture: project text is kept as a project', normalizeCaptureText('P:') === 'P:');
+  check('capture: empty input normalizes to empty', normalizeCaptureText('   ') === '');
+  check(
+    'capture: @due(tomorrow) resolves to ISO',
+    normalizeCaptureText('買牛奶 @due(tomorrow)', capNow) === '- 買牛奶 @due(2026-07-09)',
+    normalizeCaptureText('買牛奶 @due(tomorrow)', capNow),
+  );
+  check(
+    'capture: @start/@defer resolve, other tags untouched',
+    normalizeCaptureText('a @start(next fri) @flag(soon)', capNow) ===
+      '- a @start(2026-07-10) @flag(soon)',
+    normalizeCaptureText('a @start(next fri) @flag(soon)', capNow),
+  );
+  check(
+    'capture: unresolvable date value is left as typed',
+    normalizeCaptureText('a @due(sometime)', capNow) === '- a @due(sometime)',
   );
 }
 
