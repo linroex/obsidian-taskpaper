@@ -141,6 +141,15 @@ body.taskpaper-no-strike .tp-done {
   color: var(--text-muted);
 }
 
+/* On a done line, tags dim along with the text instead of keeping their
+ * accent colors (matching the original: the whole item fades). */
+.tp-done .tp-tag,
+.tp-done .tp-tag-today,
+.tp-done .tp-tag-due,
+.tp-done .tp-tag-done {
+  color: var(--text-faint);
+}
+
 /* The task's leading dash is a button: clicking it toggles @done. */
 .tp-task-dash {
   cursor: pointer;
