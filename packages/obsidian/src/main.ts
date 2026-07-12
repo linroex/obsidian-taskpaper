@@ -220,6 +220,12 @@ export default class TaskPaperPlugin extends Plugin {
       name: 'Open sidebar (projects & tags)',
       callback: () => this.activateSidebar(),
     });
+    // Quick capture works from anywhere — no TaskPaper view required.
+    this.addCommand({
+      id: 'quick-capture',
+      name: '快速新增任務',
+      callback: () => this.commands.quickCapture(),
+    });
     cmd('toggle-calendar-view', 'Toggle calendar view', (v) => v.toggleCalendarMode());
     // Compatibility alias: 'open-calendar' predates the in-tab calendar mode;
     // existing user hotkeys keep working.

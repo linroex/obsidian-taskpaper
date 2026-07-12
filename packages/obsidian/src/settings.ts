@@ -23,6 +23,10 @@ export interface TaskPaperSettings {
   includeTags: string;
   /** Tags never shown in the sidebar — space/comma separated, '@' optional. */
   excludeTags: string;
+  /** Vault path of the file Quick Capture appends to. */
+  inboxFile: string;
+  /** Project path ('Work/收件匣') Quick Capture inserts under; empty = document end. */
+  inboxProject: string;
 }
 
 export const DEFAULT_SETTINGS: TaskPaperSettings = {
@@ -41,6 +45,8 @@ export const DEFAULT_SETTINGS: TaskPaperSettings = {
   ],
   includeTags: '',
   excludeTags: 'search',
+  inboxFile: 'Inbox.taskpaper',
+  inboxProject: '',
 };
 
 export class TaskPaperSettingTab extends PluginSettingTab {
@@ -136,6 +142,32 @@ export class TaskPaperSettingTab extends PluginSettingTab {
             this.plugin.settings.calendarWeekStart = Number(v);
             await this.plugin.saveSettings();
             this.plugin.refreshSidebar();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('快速新增：收件匣檔案')
+      .setDesc('「快速新增任務」寫入的 .taskpaper 檔案路徑（相對於 vault 根目錄），不存在時會自動建立。')
+      .addText((t) =>
+        t
+          .setPlaceholder('Inbox.taskpaper')
+          .setValue(this.plugin.settings.inboxFile)
+          .onChange(async (v) => {
+            this.plugin.settings.inboxFile = v.trim() || 'Inbox.taskpaper';
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('快速新增：目標專案')
+      .setDesc('任務加入的專案路徑（例如 Work/收件匣）。留空表示加到文件末尾；專案不存在時會自動建立。')
+      .addText((t) =>
+        t
+          .setPlaceholder('Work/收件匣')
+          .setValue(this.plugin.settings.inboxProject)
+          .onChange(async (v) => {
+            this.plugin.settings.inboxProject = v.trim();
+            await this.plugin.saveSettings();
           }),
       );
 
