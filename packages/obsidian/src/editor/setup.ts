@@ -38,6 +38,10 @@ export interface EditorHost {
   onDocChanged(doc: string): void;
   /** Open a clicked link (http/mailto/scheme/file). */
   openLink(href: string, kind: LinkKind): void;
+  /** Whether a [[wikilink]]'s note path resolves to an existing note. */
+  resolveWikilink(linkpath: string): boolean;
+  /** Open a clicked resolved [[wikilink]] (link text before `|`, e.g. `Note#h`). */
+  openWikilink(linktext: string): void;
   /** Persist the current editor content immediately (Cmd-S, blur). */
   saveNow(): void;
   /** Hit-test hook for handle drags over the sidebar (tests inject one —
@@ -101,7 +105,10 @@ export function createEditorExtensions(host: EditorHost): Extension[] {
     dashClickExtension({
       stamp: () => host.doneStamp(),
     }),
-    linkExtension((href, kind) => host.openLink(href, kind)),
+    linkExtension((href, kind) => host.openLink(href, kind), {
+      resolve: (linkpath) => host.resolveWikilink(linkpath),
+      open: (linktext) => host.openWikilink(linktext),
+    }),
     EditorView.lineWrapping,
     keymap.of([
       {

@@ -357,6 +357,14 @@ export class TaskPaperView extends TextFileView {
         this.plugin.refreshSidebarSoon();
       },
       openLink: (href, kind) => this.openLink(href, kind),
+      // Empty linkpath (`[[#heading]]`) targets this file itself.
+      resolveWikilink: (linkpath) =>
+        linkpath === ''
+          ? this.file !== null
+          : this.app.metadataCache.getFirstLinkpathDest(linkpath, this.file?.path ?? '') !== null,
+      openWikilink: (linktext) => {
+        void this.app.workspace.openLinkText(linktext, this.file?.path ?? '');
+      },
       saveNow: () => this.saveNow(),
     });
 

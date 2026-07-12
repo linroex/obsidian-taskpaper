@@ -2,7 +2,7 @@ import { Extension, RangeSetBuilder } from '@codemirror/state';
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate } from '@codemirror/view';
 import { parseTags } from '@taskpaper/core';
 
-export type LinkKind = 'url' | 'www' | 'email' | 'file' | 'path' | 'scheme';
+export type LinkKind = 'url' | 'www' | 'email' | 'file' | 'path' | 'scheme' | 'wiki';
 
 export interface LinkRange {
   /** Start offset within the line. */
@@ -10,12 +10,15 @@ export interface LinkRange {
   /** End offset (exclusive) within the line. */
   end: number;
   kind: LinkKind;
-  /** The matched text. */
+  /** The matched text (wikilinks: the link text before `|`, incl. `#heading`). */
   text: string;
   /** Precomputed href (markdown links: the target, not the display text). */
   href?: string;
   /** Markdown-link part: 'label' = `[text]`, 'url' = `(target)` (dimmed). */
   md?: 'label' | 'url';
+  /** Wikilink only: offsets of the visible portion within the line
+   *  (`[[Note|alias]]` shows `alias`; `[[Note#h]]` shows `Note#h`). */
+  display?: { start: number; end: number };
 }
 
 // One alternative per link kind; order matters (url/file/www before the
@@ -32,6 +35,10 @@ const TRAILING = /[.,;:!?'"”』」)>\]]+$/;
 /** Markdown link syntax: `[text](target)` — target without spaces/parens. */
 const MD_LINK_RE = /\[([^\[\]\n]+)\]\(([^()\s]+)\)/g;
 
+/** Wikilink syntax: `[[inner]]` — inner without brackets, split at the first
+ *  `|` into target and alias. Nested/unmatched brackets never match. */
+const WIKI_LINK_RE = /\[\[([^\[\]\n]+)\]\]/g;
+
 /** Classify a markdown link's target the same way bare links are classified. */
 function classifyTarget(target: string): LinkKind {
   if (/^https?:\/\//.test(target)) return 'url';
@@ -46,7 +53,43 @@ function classifyTarget(target: string): LinkKind {
 export function findLinks(lineText: string): LinkRange[] {
   const links: LinkRange[] = [];
 
-  // Markdown links first — their spans suppress the raw-URL scan below so the
+  // Wikilinks first — their spans suppress the markdown-link and raw-URL
+  // scans below (`[[a]](b)` is a wikilink plus plain text, and a path-like
+  // target such as `[[notes/plan]]` must not also match as a bare path).
+  const wikiSpans: { start: number; end: number }[] = [];
+  WIKI_LINK_RE.lastIndex = 0;
+  let wl: RegExpExecArray | null;
+  while ((wl = WIKI_LINK_RE.exec(lineText))) {
+    // `![[Note]]` is embed syntax — leave it as plain text (never a link).
+    if (wl.index > 0 && lineText[wl.index - 1] === '!') {
+      continue;
+    }
+    const inner = wl[1];
+    const pipe = inner.indexOf('|');
+    const target = pipe === -1 ? inner : inner.slice(0, pipe);
+    // Empty target (`[[|x]]`) or empty alias (`[[Note|]]`) — plain text.
+    if (target.trim().length === 0 || pipe === inner.length - 1) {
+      continue;
+    }
+    const innerStart = wl.index + 2;
+    const display =
+      pipe === -1
+        ? { start: innerStart, end: innerStart + inner.length }
+        : { start: innerStart + pipe + 1, end: innerStart + inner.length };
+    links.push({
+      start: wl.index,
+      end: wl.index + wl[0].length,
+      kind: 'wiki',
+      text: target,
+      href: target,
+      display,
+    });
+    wikiSpans.push({ start: wl.index, end: wl.index + wl[0].length });
+  }
+  const insideWiki = (from: number, to: number): boolean =>
+    wikiSpans.some((r) => from < r.end && to > r.start);
+
+  // Markdown links — their spans suppress the raw-URL scan below so the
   // target inside the parens isn't emitted twice (overlapping marks would
   // break the decoration builder's ordering).
   const mdSpans: { start: number; end: number }[] = [];
@@ -56,6 +99,9 @@ export function findLinks(lineText: string): LinkRange[] {
     // `![alt](url)` is image syntax, not a link — leave it as plain text.
     // (Nested brackets in labels are a documented non-goal for a task list.)
     if (md.index > 0 && lineText[md.index - 1] === '!') {
+      continue;
+    }
+    if (insideWiki(md.index, md.index + md[0].length)) {
       continue;
     }
     const target = md[2];
@@ -124,6 +170,10 @@ export function findLinks(lineText: string): LinkRange[] {
     if (insideMd(m.index, m.index + text.length)) {
       continue;
     }
+    // Anything inside a wikilink belongs to the wikilink's mark.
+    if (insideWiki(m.index, m.index + text.length)) {
+      continue;
+    }
     links.push({ start: m.index, end: m.index + text.length, kind, text });
   }
   return links.sort((a, b) => a.start - b.start);
@@ -147,7 +197,10 @@ export function linkHref(link: Pick<LinkRange, 'kind' | 'text' | 'href'>): strin
   }
 }
 
-function buildLinkDecorations(view: EditorView): DecorationSet {
+function buildLinkDecorations(
+  view: EditorView,
+  resolveWiki: (linkpath: string) => boolean,
+): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   // Viewport-only, like the other decoration plugins.
   const ranges =
@@ -163,6 +216,33 @@ function buildLinkDecorations(view: EditorView): DecorationSet {
       const links = findLinks(line.text);
       for (let n = 0; n < links.length; n++) {
         const link = links[n];
+        if (link.kind === 'wiki' && link.display) {
+          // Wikilink: `[[Note|alias]]` renders as just `alias` (`[[Note]]` /
+          // `[[Note#h]]` as the full inner text) — same live-preview rule as
+          // markdown links: syntax shows only while the cursor touches it.
+          // Resolution ignores the `#heading`/`#^block` part; unresolved
+          // links get no data-href, so clicking them is a no-op.
+          const linkFrom = line.from + link.start;
+          const linkTo = line.from + link.end;
+          const resolved = resolveWiki(link.text.split('#')[0]);
+          const mark = Decoration.mark({
+            class: resolved ? 'tp-link tp-wikilink' : 'tp-link tp-wikilink tp-link-unresolved',
+            attributes: resolved
+              ? { 'data-href': link.text, 'data-kind': 'wiki' }
+              : { 'data-kind': 'wiki' },
+          });
+          const touched = view.state.selection.ranges.some(
+            (r) => r.from <= linkTo && r.to >= linkFrom,
+          );
+          if (touched) {
+            builder.add(linkFrom, linkTo, mark);
+          } else {
+            builder.add(linkFrom, line.from + link.display.start, Decoration.replace({}));
+            builder.add(line.from + link.display.start, line.from + link.display.end, mark);
+            builder.add(line.from + link.display.end, linkTo, Decoration.replace({}));
+          }
+          continue;
+        }
         if (link.md === 'label') {
           // Markdown link: `[text](target)` renders as just `text` — the
           // syntax is hidden unless the cursor touches the link, so it stays
@@ -213,35 +293,53 @@ function buildLinkDecorations(view: EditorView): DecorationSet {
   return builder.finish();
 }
 
-const linkDecorations = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet;
-    constructor(view: EditorView) {
-      this.decorations = buildLinkDecorations(view);
-    }
-    update(update: ViewUpdate) {
-      if (update.docChanged || update.viewportChanged || update.selectionSet) {
-        this.decorations = buildLinkDecorations(update.view);
+const linkDecorations = (resolveWiki: (linkpath: string) => boolean) =>
+  ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet;
+      constructor(view: EditorView) {
+        this.decorations = buildLinkDecorations(view, resolveWiki);
       }
-    }
-  },
-  { decorations: (v) => v.decorations },
-);
+      update(update: ViewUpdate) {
+        if (update.docChanged || update.viewportChanged || update.selectionSet) {
+          this.decorations = buildLinkDecorations(update.view, resolveWiki);
+        }
+      }
+    },
+    { decorations: (v) => v.decorations },
+  );
+
+/** How the editor resolves and opens `[[wikilinks]]` (injected by the host). */
+export interface WikilinkHandlers {
+  /** Whether the note path (before `#`) resolves to an existing note. */
+  resolve(linkpath: string): boolean;
+  /** Open a resolved wikilink (full link text before `|`, e.g. `Note#h`). */
+  open(linktext: string): void;
+}
 
 /** Detect + underline links in item text; clicking one opens it via `open`. */
-export function linkExtension(open: (href: string, kind: LinkKind) => void): Extension {
+export function linkExtension(
+  open: (href: string, kind: LinkKind) => void,
+  wiki: WikilinkHandlers,
+): Extension {
   return [
-    linkDecorations,
+    linkDecorations((linkpath) => wiki.resolve(linkpath)),
     EditorView.domEventHandlers({
       click(event) {
         const target = event.target instanceof HTMLElement ? event.target : null;
         const linkEl = target?.closest('.tp-link');
         const href = linkEl?.getAttribute('data-href');
         if (!href) {
+          // Includes unresolved wikilinks (no data-href): clicking them only
+          // places the cursor — never creates a note.
           return false;
         }
         event.preventDefault();
-        open(href, (linkEl?.getAttribute('data-kind') as LinkKind) ?? 'url');
+        if (linkEl?.getAttribute('data-kind') === 'wiki') {
+          wiki.open(href);
+        } else {
+          open(href, (linkEl?.getAttribute('data-kind') as LinkKind) ?? 'url');
+        }
         return true;
       },
     }),
