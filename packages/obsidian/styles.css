@@ -104,10 +104,18 @@
   caret-color: var(--text-normal);
 }
 
-/* Projects — bold headings. */
+/* Projects — bold headings, with built-in space above so consecutive
+ * projects separate visually without needing a blank line in the file.
+ * (Purely visual padding on the line block; the document is untouched,
+ * and parent guide lines run through the gap unbroken.) */
 .tp-project {
   font-weight: 700;
   color: var(--text-normal);
+  padding-top: 0.7em;
+}
+
+.taskpaper-view .cm-line.tp-project:first-child {
+  padding-top: 0;
 }
 
 /* Notes — softer, secondary text. */
