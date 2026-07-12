@@ -219,12 +219,16 @@ export class TaskPaperCommands {
     const outline = outlineOf(state);
     const itemLines: number[] = [];
     for (const [start, end] of selectedLineRanges(state)) {
+      // Track per range — a later cursor sitting on a non-item line must
+      // still resolve via itemAtLine even when earlier ranges found items.
+      let added = false;
       for (const item of outline.items) {
         if (item.line >= start && item.line <= end) {
           itemLines.push(item.line);
+          added = true;
         }
       }
-      if (itemLines.length === 0) {
+      if (!added) {
         const item = itemAtLine(outline, start);
         if (item) {
           itemLines.push(item.line);
