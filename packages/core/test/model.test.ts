@@ -23,6 +23,7 @@ import {
 } from '../src/outlineOps';
 import { expandSelectionRange, selectBranchRange } from '../src/selection';
 import { projectStats, documentCounts, rewriteSearchLine, savedSearches, tagNamesToValues } from '../src/analysis';
+import { markdownToTaskPaper } from '../src/convert';
 import {
   ancestorProjectPath,
   applyArchivePlan,
@@ -178,6 +179,33 @@ check('slice range on parenthesized expr', qa('(project Inbox//task)[1:]').join(
 check('@id equality', qa('@id = 1').join(',') === 'a1', qa('@id = 1').join(','));
 check('@id numeric compare', qa('@id <[n] 3').join(',') === 'Inbox,a1,a2', qa('@id <[n] 3').join(','));
 check('@id present on all items', qa('@id').length === adv.items.length, String(qa('@id').length));
+
+// --- markdown → taskpaper conversion (file-menu 轉換) ---
+{
+  const md = [
+    '# 專案甲',
+    'intro text',
+    '- [ ] open task',
+    '- [x] finished task',
+    '  - [ ] nested (2-space)',
+    '* star item',
+    '## 子專案',
+    '    - [X] four-space nested done',
+    'plain note',
+  ];
+  const tp = markdownToTaskPaper(md);
+  check('h1 becomes a root project', tp[0] === '專案甲:', tp[0]);
+  check('body text passes through', tp[1] === 'intro text');
+  check('unchecked box becomes a task', tp[2] === '- open task', tp[2]);
+  check('checked box gains @done', tp[3] === '- finished task @done', tp[3]);
+  check('2-space nesting becomes a tab', tp[4] === '\t- nested (2-space)', JSON.stringify(tp[4]));
+  check('star items normalize to dashes', tp[5] === '- star item', tp[5]);
+  check('h2 becomes a nested project', tp[6] === '\t子專案:', JSON.stringify(tp[6]));
+  check('4-space nesting becomes a tab', tp[7] === '\t- four-space nested done @done', JSON.stringify(tp[7]));
+  check('plain lines stay notes', tp[8] === 'plain note');
+  check('heading with trailing colon not doubled', markdownToTaskPaper(['# A:'])[0] === 'A:');
+  check('closing-hash headings are trimmed', markdownToTaskPaper(['## B ##'])[0] === '\tB:');
+}
 
 // --- tag helpers ---
 check('addTag done', addTag('- foo', 'done', '2026-07-08') === '- foo @done(2026-07-08)');

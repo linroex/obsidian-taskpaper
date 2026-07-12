@@ -1,5 +1,5 @@
-import { Plugin, WorkspaceLeaf } from 'obsidian';
-import { documentCounts } from '@taskpaper/core';
+import { Notice, Plugin, TFile, TFolder, WorkspaceLeaf } from 'obsidian';
+import { documentCounts, markdownToTaskPaper } from '@taskpaper/core';
 import { TaskPaperView, VIEW_TYPE_TASKPAPER } from './view';
 import { TaskPaperSidebarView, VIEW_TYPE_SIDEBAR } from './sidebar';
 import { TaskPaperCommands } from './commands';
@@ -42,6 +42,28 @@ export default class TaskPaperPlugin extends Plugin {
     );
 
     this.addRibbonIcon('list-checks', 'TaskPaper sidebar', () => this.activateSidebar());
+
+    // File-explorer context menu: create a .taskpaper in a folder, or convert
+    // a markdown note into one (headings → projects, checkboxes → tasks).
+    this.registerEvent(
+      this.app.workspace.on('file-menu', (menu, file) => {
+        if (file instanceof TFolder) {
+          menu.addItem((mi) =>
+            mi
+              .setTitle('新增 TaskPaper 檔案')
+              .setIcon('list-checks')
+              .onClick(() => this.createTaskPaperFile(file)),
+          );
+        } else if (file instanceof TFile && file.extension === 'md') {
+          menu.addItem((mi) =>
+            mi
+              .setTitle('轉換為 TaskPaper')
+              .setIcon('list-checks')
+              .onClick(() => this.convertNoteToTaskPaper(file)),
+          );
+        }
+      }),
+    );
     this.addSettingTab(new TaskPaperSettingTab(this.app, this));
     this.applyBodyClasses();
     this.registerCommands();
@@ -202,6 +224,35 @@ export default class TaskPaperPlugin extends Plugin {
     // Compatibility alias: 'open-calendar' predates the in-tab calendar mode;
     // existing user hotkeys keep working.
     cmd('open-calendar', 'Open calendar', (v) => v.setViewMode('calendar'));
+  }
+
+  /** Create an untitled .taskpaper file in the folder and open it. */
+  private async createTaskPaperFile(folder: TFolder): Promise<void> {
+    const base = folder.path === '/' ? '' : `${folder.path}/`;
+    let path = `${base}未命名.taskpaper`;
+    for (let n = 1; this.app.vault.getAbstractFileByPath(path) !== null; n++) {
+      path = `${base}未命名 ${n}.taskpaper`;
+    }
+    const file = await this.app.vault.create(path, '');
+    await this.app.workspace.getLeaf('tab').openFile(file);
+  }
+
+  /** Convert a markdown note in place: transform the content, then rename
+   *  the extension (fileManager.renameFile keeps links pointing at it). */
+  private async convertNoteToTaskPaper(file: TFile): Promise<void> {
+    const target = file.path.replace(/\.md$/, '.taskpaper');
+    if (this.app.vault.getAbstractFileByPath(target) !== null) {
+      new Notice(`已存在同名檔案：${target}`);
+      return;
+    }
+    await this.app.vault.process(file, (content) =>
+      markdownToTaskPaper(content.split('\n')).join('\n'),
+    );
+    await this.app.fileManager.renameFile(file, target);
+    const renamed = this.app.vault.getAbstractFileByPath(target);
+    if (renamed instanceof TFile) {
+      await this.app.workspace.getLeaf('tab').openFile(renamed);
+    }
   }
 
   async loadSettings(): Promise<void> {
