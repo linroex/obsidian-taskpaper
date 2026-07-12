@@ -111,6 +111,11 @@
 .tp-project {
   font-weight: 700;
   color: var(--text-normal);
+}
+
+/* Higher specificity than CodeMirror's own `.cm-line { padding: 0 2px }`
+ * (injected after our stylesheet), which was resetting the top padding. */
+.taskpaper-view .cm-line.tp-project {
   padding-top: 1.1em;
 }
 
