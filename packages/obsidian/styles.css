@@ -613,6 +613,20 @@ body.taskpaper-no-strike .tp-done {
   line-height: 1.4;
 }
 
+/* Calendar drag-reschedule: occurrences drag onto day cells / agenda dates. */
+.taskpaper-calendar .tp-cal-occ {
+  cursor: grab;
+}
+
+.taskpaper-calendar .tp-cal-occ.is-dragging {
+  opacity: 0.5;
+}
+
+.taskpaper-calendar .tp-cal-day.tp-cal-drop,
+.taskpaper-calendar .tp-cal-section.tp-cal-drop {
+  box-shadow: inset 0 0 0 2px var(--interactive-accent);
+}
+
 /* ---- sidebar drag & drop ---- */
 
 /* A hoisted project (Alt+click / context menu): its row shows dimmed —

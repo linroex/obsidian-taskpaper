@@ -1,12 +1,15 @@
 import { Notice, setIcon } from 'obsidian';
 import type { EditorState } from '@codemirror/state';
 import {
+  addTag,
   calendarModel,
   CalendarModel,
   CalendarOccurrence,
   isoDate,
   isoMonth,
   isoWeekLabel,
+  removeTag,
+  setTagValue,
   stripTags,
 } from '@taskpaper/core';
 import { outlineOf } from './editor/outline';
@@ -30,6 +33,8 @@ export interface CalendarHost {
   weekStart(): number;
   /** Whether the month grid shows ISO week labels (W627). */
   showWeekNumbers(): boolean;
+  /** Replace one line's text as a single undoable transaction (drag-reschedule). */
+  setLineText(line: number, text: string): void;
 }
 
 /**
@@ -49,6 +54,10 @@ export class CalendarPane {
   private renderedSignature: string | null = null;
   private midnightTimer: number | null = null;
   private active = false;
+  /** The occurrence being dragged to another date, while a drag is live. */
+  private dragOcc: CalendarOccurrence | null = null;
+  /** Document snapshot at dragstart — a changed doc rejects the drop. */
+  private dragDoc: unknown = null;
 
   constructor(
     private containerEl: HTMLElement,
@@ -197,7 +206,10 @@ export class CalendarPane {
     todayStr: string,
     breadcrumb: string | undefined,
   ): void {
-    const el = parent.createDiv({ cls: 'tp-cal-occ', attr: { 'data-line': occ.line } });
+    const el = parent.createDiv({
+      cls: 'tp-cal-occ',
+      attr: { 'data-line': occ.line, draggable: 'true' },
+    });
     el.createSpan({ cls: `tp-cal-dot ${this.roleClass(occ, todayStr)}` });
     el.createSpan({ cls: 'tp-cal-occ-text', text: occ.text || '(空白項目)' });
     if (breadcrumb) {
@@ -205,6 +217,79 @@ export class CalendarPane {
     }
     el.setAttr('title', occ.projectPath ? `${occ.text} — ${occ.projectPath}` : occ.text);
     el.onclick = () => this.openOccurrence(occ);
+    el.addEventListener('dragstart', (e: DragEvent) => {
+      this.dragOcc = occ;
+      this.dragDoc = this.host.state().doc;
+      el.addClass('is-dragging');
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', occ.text);
+      }
+    });
+    el.addEventListener('dragend', () => {
+      this.dragOcc = null;
+      this.dragDoc = null;
+      el.removeClass('is-dragging');
+      this.clearDropTargets();
+    });
+  }
+
+  private clearDropTargets(): void {
+    for (const marked of Array.from(this.containerEl.querySelectorAll('.tp-cal-drop'))) {
+      marked.classList.remove('tp-cal-drop');
+    }
+  }
+
+  /** Make a day cell / agenda section accept occurrence drops onto `date`. */
+  private registerDropTarget(el: HTMLElement, date: string): void {
+    el.addEventListener('dragover', (e: DragEvent) => {
+      if (!this.dragOcc || this.dragOcc.date === date) {
+        return;
+      }
+      e.preventDefault(); // marks a valid drop target
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'move';
+      }
+      this.clearDropTargets();
+      el.addClass('tp-cal-drop');
+    });
+    el.addEventListener('dragleave', () => el.removeClass('tp-cal-drop'));
+    el.addEventListener('drop', (e: DragEvent) => {
+      e.preventDefault();
+      this.clearDropTargets();
+      const occ = this.dragOcc;
+      const doc = this.dragDoc;
+      this.dragOcc = null;
+      this.dragDoc = null;
+      if (occ && occ.date !== date) {
+        this.rescheduleTo(occ, date, doc);
+      }
+    });
+  }
+
+  /** Rewrite the dragged occurrence's date tag — guarded like openOccurrence. */
+  private rescheduleTo(occ: CalendarOccurrence, date: string, dragDoc: unknown): void {
+    const state = this.host.state();
+    const fingerprint = (line: string): string =>
+      stripTags(line.replace(/^[\t ]*(?:-\s*)?/, ''));
+    const stale =
+      state.doc !== dragDoc ||
+      occ.line + 1 > state.doc.lines ||
+      fingerprint(state.doc.line(occ.line + 1).text) !== occ.text.trim();
+    if (stale) {
+      new Notice('文件已變更，未改期——行事曆已重新整理。');
+      this.render(true);
+      return;
+    }
+    const lineText = state.doc.line(occ.line + 1).text;
+    // @today items become dated (@today is replaced, per the agreed design);
+    // completed items move their @done date; everything else is @due.
+    const next =
+      occ.role === 'today'
+        ? addTag(removeTag(lineText, 'today'), 'due', date)
+        : setTagValue(lineText, occ.role === 'completed' ? 'done' : 'due', date);
+    this.host.setLineText(occ.line, next);
+    this.render(true);
   }
 
   private renderMonthGrid(container: HTMLElement, model: CalendarModel, todayStr: string): void {
@@ -242,6 +327,7 @@ export class CalendarPane {
           cls += ' is-today';
         }
         const cell = grid.createDiv({ cls, attr: { 'data-date': day.date } });
+        this.registerDropTarget(cell, day.date);
         cell.createDiv({ cls: 'tp-cal-day-num', text: String(Number(day.date.slice(8))) });
         for (const occ of day.occurrences.slice(0, maxShown)) {
           this.renderOccurrence(cell, occ, todayStr, undefined);
@@ -290,7 +376,8 @@ export class CalendarPane {
       return;
     }
     for (const entry of model.agenda) {
-      const section = list.createDiv({ cls: 'tp-cal-section' });
+      const section = list.createDiv({ cls: 'tp-cal-section', attr: { 'data-date': entry.date } });
+      this.registerDropTarget(section, entry.date);
       section.createDiv({
         cls: 'tp-cal-section-heading',
         text: this.dateHeading(entry.date, todayStr),

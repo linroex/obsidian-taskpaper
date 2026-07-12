@@ -50,6 +50,10 @@ function mountCalendar(doc: string) {
         scrollIntoView: true,
       });
     },
+    setLineText: (line, text) => {
+      const doc = mounted.view.state.doc.line(line + 1);
+      mounted.view.dispatch({ changes: { from: doc.from, to: doc.to, insert: text } });
+    },
   });
   calendar.now = () => TODAY;
   calendar.setActive(true);
@@ -233,6 +237,7 @@ function textOf(occ: HTMLElement): string {
     weekStart: () => 1,
     showWeekNumbers: () => true,
     jumpToLine: () => {},
+    setLineText: () => {},
   });
   pane.now = () => TODAY;
   pane.render(true);
@@ -241,6 +246,56 @@ function textOf(occ: HTMLElement): string {
   check('activation renders the grid', root.querySelector('.tp-cal-grid') !== null);
   pane.setActive(false);
   mounted.cleanup();
+}
+
+// --- drag an occurrence to another day rewrites its date ---
+{
+  const fx = mountCalendar(DOC);
+  const drag = (occText: string, toDate: string) => {
+    const occ = Array.from(fx.root.querySelectorAll<HTMLElement>('.tp-cal-occ')).find(
+      (el) => el.textContent?.includes(occText),
+    )!;
+    occ.dispatchEvent(new window.Event('dragstart', { bubbles: true }));
+    const cell = fx.cell(toDate)!;
+    cell.dispatchEvent(new window.Event('dragover', { bubbles: true }));
+    cell.dispatchEvent(new window.Event('drop', { bubbles: true }));
+  };
+
+  drag('alpha', '2026-07-20');
+  check(
+    'dragging a due task to another day rewrites @due',
+    docText(fx.editor).includes('- alpha @due(2026-07-20)'),
+    docText(fx.editor).split('\n')[2],
+  );
+  check(
+    'the calendar re-renders with the moved occurrence',
+    fx.occs(fx.cell('2026-07-20')!).some((o) => o.textContent?.includes('alpha')),
+  );
+
+  drag('beta', '2026-07-21');
+  check(
+    'dragging a virtual @today item converts it to @due',
+    docText(fx.editor).includes('- beta @due(2026-07-21)') && !docText(fx.editor).includes('@today'),
+    docText(fx.editor).split('\n')[3],
+  );
+  fx.cleanup();
+}
+
+// --- a document edit between dragstart and drop rejects the reschedule ---
+{
+  const fx = mountCalendar(DOC);
+  const occ = Array.from(fx.root.querySelectorAll<HTMLElement>('.tp-cal-occ')).find(
+    (el) => el.textContent?.includes('alpha'),
+  )!;
+  occ.dispatchEvent(new window.Event('dragstart', { bubbles: true }));
+  fx.editor.dispatch({ changes: { from: 0, insert: '- sneaky\n' } }); // doc drifts mid-drag
+  const before = docText(fx.editor);
+  const cell = fx.cell('2026-07-20')!;
+  cell.dispatchEvent(new window.Event('dragover', { bubbles: true }));
+  cell.dispatchEvent(new window.Event('drop', { bubbles: true }));
+  check('a drifted document rejects the drop', docText(fx.editor) === before);
+  check('the rejection shows a notice', Notice.messages[Notice.messages.length - 1]?.includes('未改期') === true, String(Notice.messages[Notice.messages.length - 1]));
+  fx.cleanup();
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

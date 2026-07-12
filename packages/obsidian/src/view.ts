@@ -100,6 +100,10 @@ export class TaskPaperView extends TextFileView {
       state: () => this.editor.state,
       weekStart: () => this.plugin.settings.calendarWeekStart,
       showWeekNumbers: () => this.plugin.settings.calendarShowWeekNumbers !== false,
+      setLineText: (line, text) => {
+        const doc = this.editor.state.doc.line(line + 1);
+        this.editor.dispatch({ changes: { from: doc.from, to: doc.to, insert: text } });
+      },
       jumpToLine: (line) => {
         this.setViewMode('editor');
         this.editor.dispatch({
