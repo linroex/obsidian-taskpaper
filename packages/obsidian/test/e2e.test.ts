@@ -25,6 +25,7 @@ import {
 } from './e2eHarness';
 import { foldedRanges } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
+import { advanceDate, todayStamp } from '@taskpaper/core';
 import { App, Menu, Notice, setIcon, TFile } from 'obsidian';
 import { filterSpecField } from '../src/editor/filter';
 import { refreshLinks } from '../src/editor/links';
@@ -351,6 +352,94 @@ const DOC = [
   const { view, host, cleanup } = mountEditor(DOC);
   check('ctrl-s is handled', press(view, 's', { ctrl: true }));
   check('ctrl-s saved through the host', host.saves === 1);
+  cleanup();
+}
+
+// --- dash click on a @repeat task: done + successor in ONE transaction ---
+{
+  const doc = [
+    'Home:',
+    '\t- water plants @due(2026-07-01) @repeat(1w)',
+    '\t\t- refill the can',
+    '\t- other',
+  ].join('\n');
+  const { view, host, cleanup } = mountEditor(doc);
+
+  clickEl(findMark(view, 'tp-task-dash')[0]); // the dash of "- water plants"
+  check(
+    'repeat: dash click stamps @done on the line',
+    view.state.doc.line(2).text === '\t- water plants @due(2026-07-01) @repeat(1w) @done(2026-01-02)',
+    view.state.doc.line(2).text,
+  );
+  check(
+    'repeat: successor spawns AFTER the whole subtree, date advanced',
+    view.state.doc.line(4).text === '\t- water plants @due(2026-07-08) @repeat(1w)',
+    view.state.doc.line(4).text,
+  );
+  check('repeat: children stay with the completed instance', view.state.doc.line(3).text === '\t\t- refill the can');
+  check(
+    'repeat: done + spawn arrive as ONE transaction',
+    host.docChanges.length === 1 && view.state.doc.lines === 5,
+    String(host.docChanges.length),
+  );
+
+  check('repeat: one Cmd-Z is handled', press(view, 'z', { ctrl: true }));
+  check('repeat: a single undo reverts BOTH the stamp and the spawn', docText(view) === doc, JSON.stringify(docText(view)));
+
+  // Un-done then re-done must not duplicate the successor (dedupe guard).
+  clickEl(findMark(view, 'tp-task-dash')[0]); // done again -> spawn
+  clickEl(findMark(view, 'tp-task-dash')[0]); // un-done (successor stays)
+  check(
+    'repeat: toggling done OFF keeps the successor and removes @done',
+    view.state.doc.line(2).text === '\t- water plants @due(2026-07-01) @repeat(1w)' &&
+      view.state.doc.line(4).text === '\t- water plants @due(2026-07-08) @repeat(1w)',
+    view.state.doc.line(2).text,
+  );
+  clickEl(findMark(view, 'tp-task-dash')[0]); // re-done -> dedupe, no second spawn
+  check(
+    'repeat: re-done does not duplicate the successor',
+    view.state.doc.lines === 5 &&
+      view.state.doc.line(4).text === '\t- water plants @due(2026-07-08) @repeat(1w)' &&
+      view.state.doc.line(5).text === '\t- other',
+    docText(view),
+  );
+  check('repeat: no warning notices along the way', host.notices.length === 0, host.notices.join(' | '));
+  cleanup();
+}
+
+// --- dash click with @repeat but no date anchor: done, no spawn, a Notice ---
+{
+  const { view, host, cleanup } = mountEditor('- solo @repeat(1w)');
+  clickEl(findMark(view, 'tp-task-dash')[0]);
+  check(
+    'repeat: a no-anchor task still completes',
+    view.state.doc.line(1).text === '- solo @repeat(1w) @done(2026-01-02)',
+    view.state.doc.line(1).text,
+  );
+  check('repeat: no successor without a date anchor', view.state.doc.lines === 1);
+  check(
+    'repeat: the no-anchor warning reaches the host notify (a Notice in production)',
+    host.notices.length === 1 && host.notices[0] === '@repeat 需要 @due 或 @start 日期才能產生下一次',
+    host.notices.join(' | '),
+  );
+  cleanup();
+}
+
+// --- dash click on a bare-@today @repeat task: @due(today + interval) ---
+{
+  const { view, cleanup } = mountEditor('- t @today @repeat(3d)');
+  clickEl(findMark(view, 'tp-task-dash')[0]);
+  const expectedDue = advanceDate(todayStamp(false), 3, 'd');
+  check(
+    'repeat: completing drops @today as usual',
+    view.state.doc.line(1).text === '- t @repeat(3d) @done(2026-01-02)',
+    view.state.doc.line(1).text,
+  );
+  check(
+    'repeat: bare @today converts to @due(today + interval) on the successor',
+    view.state.doc.line(2).text === `- t @repeat(3d) @due(${expectedDue})`,
+    view.state.doc.line(2).text,
+  );
   cleanup();
 }
 

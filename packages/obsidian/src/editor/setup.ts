@@ -26,6 +26,8 @@ export interface EditorHost {
   hide(): boolean;
   /** The @done stamp to apply (already formatted per settings). */
   doneStamp(): string;
+  /** Show a user-facing warning (a Notice in production). */
+  notify(message: string): void;
   /** Record the focused project line (0-based), or clear it with null. */
   setFocusedLine(line: number | null): void;
   /** Refresh filter-dependent UI (the sidebar / status bar). */
@@ -104,6 +106,7 @@ export function createEditorExtensions(host: EditorHost): Extension[] {
     }),
     dashClickExtension({
       stamp: () => host.doneStamp(),
+      notify: (message) => host.notify(message),
     }),
     linkExtension((href, kind) => host.openLink(href, kind), {
       resolve: (linkpath) => host.resolveWikilink(linkpath),

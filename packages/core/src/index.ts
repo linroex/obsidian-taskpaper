@@ -8,6 +8,7 @@ export * from './archive';
 export * from './convert';
 export * from './calendar';
 export * from './focus';
+export * from './repeat';
 export * from './query/lexer';
 export * from './query/parser';
 export * from './query/evaluator';

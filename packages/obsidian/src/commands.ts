@@ -26,7 +26,6 @@ import {
   planArchiveDone,
   removeAllTags,
   removeTag,
-  toggleDoneLine,
   savedSearches,
   selectedRootLines,
   setLineKind,
@@ -45,6 +44,7 @@ import {
 import { applyOutlineOp, dispatchOutlineEdit, docLines } from './editor/outlineEdit';
 import { copyDisplayed } from './editor/copyDisplayed';
 import { contractSelection, expandSelection, selectBranch } from './editor/selection';
+import { toggleDoneSelection } from './editor/toggleDone';
 import { collectTagNames } from './editor/tagComplete';
 import {
   DateModal,
@@ -78,7 +78,7 @@ export class TaskPaperCommands {
 
   toggleDone(view: TaskPaperView): void {
     const stamp = todayStamp(this.settings.doneIncludesTime);
-    this.applyToSelectedLines(view.editor, (text) => toggleDoneLine(text, stamp));
+    toggleDoneSelection(view.editor, stamp, (message) => new Notice(message));
   }
 
   toggleToday(view: TaskPaperView): void {

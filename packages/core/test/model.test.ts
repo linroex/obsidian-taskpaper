@@ -39,6 +39,7 @@ import {
   toggleFocusTarget,
 } from '../src/focus';
 import { calendarModel, CalendarOccurrence } from '../src/calendar';
+import { advanceDate, parseRepeat, planToggleDone, REPEAT_NEEDS_DATE_NOTICE } from '../src/repeat';
 
 let pass = 0;
 let fail = 0;
@@ -1046,6 +1047,139 @@ check('toggle from none focuses', toggleFocusTarget(null, 3) === 3);
     mon.weeks.length === 5 && mon.weeks[4][6].date === '2026-08-02',
     mon.weeks[4][6].date,
   );
+}
+
+// --- recurring tasks: parseRepeat / advanceDate / planToggleDone ---
+{
+  // parseRepeat validity matrix.
+  check('repeat: 1w parses', JSON.stringify(parseRepeat('- x @repeat(1w)')) === '{"n":1,"unit":"w"}');
+  check('repeat: 10d parses', JSON.stringify(parseRepeat('- x @repeat(10d)')) === '{"n":10,"unit":"d"}');
+  check('repeat: 3m parses', JSON.stringify(parseRepeat('- x @repeat(3m)')) === '{"n":3,"unit":"m"}');
+  check('repeat: 1y parses', JSON.stringify(parseRepeat('- x @repeat(1y)')) === '{"n":1,"unit":"y"}');
+  check('repeat: 0w is invalid', parseRepeat('- x @repeat(0w)') === null);
+  check('repeat: -1d is invalid', parseRepeat('- x @repeat(-1d)') === null);
+  check('repeat: 1.5w is invalid', parseRepeat('- x @repeat(1.5w)') === null);
+  check('repeat: foo is invalid', parseRepeat('- x @repeat(foo)') === null);
+  check('repeat: bare @repeat is invalid', parseRepeat('- x @repeat') === null);
+  check('repeat: no tag at all', parseRepeat('- x @due(2026-07-01)') === null);
+  check(
+    'repeat: first VALID duplicate wins',
+    JSON.stringify(parseRepeat('- x @repeat(0w) @repeat(2d) @repeat(1y)')) === '{"n":2,"unit":"d"}',
+  );
+
+  // advanceDate: calendar-aware, end-of-month clamped.
+  check('advance: +1w', advanceDate('2026-07-01', 1, 'w') === '2026-07-08', advanceDate('2026-07-01', 1, 'w'));
+  check('advance: +10d', advanceDate('2026-07-01', 10, 'd') === '2026-07-11', advanceDate('2026-07-01', 10, 'd'));
+  check('advance: +3m', advanceDate('2026-07-15', 3, 'm') === '2026-10-15', advanceDate('2026-07-15', 3, 'm'));
+  check('advance: +1y', advanceDate('2026-07-15', 1, 'y') === '2027-07-15', advanceDate('2026-07-15', 1, 'y'));
+  check('advance: Jan 31 +1m clamps to Feb 28', advanceDate('2026-01-31', 1, 'm') === '2026-02-28', advanceDate('2026-01-31', 1, 'm'));
+  check('advance: Jan 31 +1m in a leap year clamps to Feb 29', advanceDate('2024-01-31', 1, 'm') === '2024-02-29', advanceDate('2024-01-31', 1, 'm'));
+  check('advance: leap day +1y clamps to Feb 28', advanceDate('2024-02-29', 1, 'y') === '2025-02-28', advanceDate('2024-02-29', 1, 'y'));
+  check('advance: time of day survives', advanceDate('2026-07-01 09:30', 1, 'd') === '2026-07-02 09:30', advanceDate('2026-07-01 09:30', 1, 'd'));
+  check('advance: unparseable input returned unchanged', advanceDate('nonsense', 1, 'd') === 'nonsense');
+
+  const repOpts = { stamp: '2026-07-10', tabSize: 4, now: new Date(2026, 6, 10) };
+
+  // Spawn lands after the completed item's ENTIRE subtree, same indentation.
+  {
+    const doc = [
+      'Work:',
+      '\t- water plants @due(2026-07-01) @repeat(1w)',
+      '\t\t- refill the can',
+      '\t- other',
+    ];
+    const plan = planToggleDone(doc, [1], repOpts);
+    check('plan: completed line gets @done', plan.changes.length === 1 && plan.changes[0].line === 1 && plan.changes[0].text === '\t- water plants @due(2026-07-01) @repeat(1w) @done(2026-07-10)', JSON.stringify(plan.changes));
+    check('plan: successor after the subtree, date advanced', plan.inserts.length === 1 && plan.inserts[0].afterLine === 2 && plan.inserts[0].text === '\t- water plants @due(2026-07-08) @repeat(1w)', JSON.stringify(plan.inserts));
+    check('plan: no notices when anchored', plan.notices.length === 0);
+  }
+
+  // Every date anchor advances from its OWN value; @today is dropped.
+  {
+    const doc = ['- multi @start(2026-07-01) @due(2026-07-03) @today @repeat(2d)'];
+    const plan = planToggleDone(doc, [0], repOpts);
+    check(
+      'plan: due and start both advance, @today dropped',
+      plan.inserts[0]?.text === '- multi @start(2026-07-03) @due(2026-07-05) @repeat(2d)',
+      JSON.stringify(plan.inserts),
+    );
+  }
+
+  // Bare @today with no other anchor converts to @due(today + interval).
+  {
+    const doc = ['- t @today @repeat(3d)'];
+    const plan = planToggleDone(doc, [0], repOpts);
+    check('plan: @today line completes without @today', plan.changes[0].text === '- t @repeat(3d) @done(2026-07-10)', plan.changes[0].text);
+    check('plan: @today converts to @due(today+interval)', plan.inserts[0]?.text === '- t @repeat(3d) @due(2026-07-13)', JSON.stringify(plan.inserts));
+  }
+
+  // No date anchor at all: done as usual, no spawn, one notice.
+  {
+    const doc = ['- solo @repeat(1w)', '- also @repeat(1w)'];
+    const plan = planToggleDone(doc, [0, 1], repOpts);
+    check('plan: no anchor still toggles done', plan.changes.length === 2);
+    check('plan: no anchor spawns nothing', plan.inserts.length === 0);
+    check('plan: the no-anchor notice (deduplicated)', plan.notices.length === 1 && plan.notices[0] === REPEAT_NEEDS_DATE_NOTICE, JSON.stringify(plan.notices));
+  }
+
+  // Unparseable anchor values don't count as anchors.
+  {
+    const plan = planToggleDone(['- x @due(nonsense) @repeat(1w)'], [0], repOpts);
+    check('plan: unparseable @due is no anchor', plan.inserts.length === 0 && plan.notices.length === 1);
+  }
+
+  // Toggling done OFF never spawns and never warns.
+  {
+    const plan = planToggleDone(['- x @due(2026-07-01) @repeat(1w) @done(2026-07-10)'], [0], repOpts);
+    check('plan: un-done removes the stamp', plan.changes[0].text === '- x @due(2026-07-01) @repeat(1w)', plan.changes[0].text);
+    check('plan: un-done spawns nothing', plan.inserts.length === 0 && plan.notices.length === 0);
+  }
+
+  // Dedupe guard: identical successor already immediately after the subtree.
+  {
+    const doc = ['- x @due(2026-07-01) @repeat(1w)', '- x @due(2026-07-08) @repeat(1w)'];
+    const plan = planToggleDone(doc, [0], repOpts);
+    check('plan: dedupe skips an existing successor', plan.changes.length === 1 && plan.inserts.length === 0, JSON.stringify(plan.inserts));
+  }
+
+  // Multi-select: every line planned against ONE snapshot.
+  {
+    const doc = [
+      '- a @due(2026-07-01) @repeat(1w)',
+      '\t- a child',
+      '- b @due(2026-07-02) @repeat(1d)',
+      '- done already @repeat(1w) @done(2026-07-01)',
+    ];
+    const plan = planToggleDone(doc, [0, 2, 3, 2], repOpts);
+    check('plan: multi-select toggles each line once', plan.changes.length === 3, JSON.stringify(plan.changes.map((c) => c.line)));
+    check(
+      'plan: multi-select spawns per anchored to-done line',
+      plan.inserts.length === 2 &&
+        plan.inserts[0].afterLine === 1 &&
+        plan.inserts[0].text === '- a @due(2026-07-08) @repeat(1w)' &&
+        plan.inserts[1].afterLine === 2 &&
+        plan.inserts[1].text === '- b @due(2026-07-03) @repeat(1d)',
+      JSON.stringify(plan.inserts),
+    );
+  }
+
+  // Trailing blank lines never separate the successor from the subtree.
+  {
+    const plan = planToggleDone(['- x @due(2026-07-01) @repeat(1w)', ''], [0], repOpts);
+    check('plan: successor goes before a trailing blank line', plan.inserts[0]?.afterLine === 0, JSON.stringify(plan.inserts));
+  }
+
+  // Natural-language anchors resolve first, then advance.
+  {
+    const plan = planToggleDone(['- x @due(today) @repeat(1w)'], [0], repOpts);
+    check('plan: natural-language @due resolves then advances', plan.inserts[0]?.text === '- x @due(2026-07-17) @repeat(1w)', JSON.stringify(plan.inserts));
+  }
+
+  // No @repeat: plain toggle, nothing else.
+  {
+    const plan = planToggleDone(['- plain @due(2026-07-01)'], [0], repOpts);
+    check('plan: no @repeat means no spawn', plan.changes.length === 1 && plan.inserts.length === 0 && plan.notices.length === 0);
+  }
 }
 
 function setEq(a: Set<number>, b: Set<number>): boolean {

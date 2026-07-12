@@ -1,4 +1,4 @@
-import { Menu, setIcon, TextFileView, WorkspaceLeaf } from 'obsidian';
+import { Menu, Notice, setIcon, TextFileView, WorkspaceLeaf } from 'obsidian';
 import { EditorSelection, EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { parseQuery, stripTags, todayStamp } from '@taskpaper/core';
@@ -355,6 +355,7 @@ export class TaskPaperView extends TextFileView {
     const extensions = createEditorExtensions({
       hide: () => this.plugin.settings.filterHidesInsteadOfDims,
       doneStamp: () => todayStamp(this.plugin.settings.doneIncludesTime),
+      notify: (message) => new Notice(message),
       setFocusedLine: (line) => {
         this.focusedLine = line;
       },
