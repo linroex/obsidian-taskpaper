@@ -1,5 +1,13 @@
 /* TaskPaper editor styling — keyed to classes emitted by the highlight plugin. */
 
+/* Theme-robust secondary text: derived from the theme's OWN body color with
+ * transparency, so it keeps contrast in any theme (dark or light) — unlike
+ * --text-faint, whose readability varies wildly between themes. */
+.taskpaper-sidebar {
+  --tp-secondary: color-mix(in srgb, var(--text-normal) 72%, transparent);
+  --tp-tertiary: color-mix(in srgb, var(--text-normal) 52%, transparent);
+}
+
 .taskpaper-view {
   display: flex;
   flex-direction: column;
@@ -402,7 +410,8 @@ body.taskpaper-no-strike .tp-done {
   font-size: var(--font-ui-smaller);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--text-faint);
+  font-weight: 600;
+  color: var(--tp-secondary);
   margin-bottom: var(--size-4-1);
   padding-left: 4px;
 }
@@ -462,14 +471,14 @@ body.taskpaper-no-strike .tp-done {
 }
 
 .taskpaper-sidebar .tp-sb-tag-count {
-  color: var(--text-faint);
+  color: var(--tp-tertiary);
   font-variant-numeric: tabular-nums;
 }
 
 /* Tag value child rows (original sidebar lists each value under its tag). */
 .taskpaper-sidebar .tp-sb-tag-value {
   padding-left: 26px;
-  color: var(--text-muted);
+  color: var(--tp-secondary);
   font-size: var(--font-ui-small);
 }
 
@@ -489,7 +498,8 @@ body.taskpaper-no-strike .tp-done {
 }
 
 .taskpaper-sidebar .tp-sb-global-badge {
-  color: var(--text-faint);
+  color: var(--tp-secondary);
+  background: var(--background-modifier-hover);
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s);
   padding: 0 4px;
