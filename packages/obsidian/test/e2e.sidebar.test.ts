@@ -18,7 +18,9 @@
  *    (drop before) and any positive clientY means "bottom half" (drop after).
  */
 import { docText, hiddenLineNumbers, mountEditor, press, RecordingHost } from './e2eHarness';
+import { EditorSelection } from '@codemirror/state';
 import { Menu, TFile, WorkspaceLeaf } from 'obsidian';
+import { DRAG_ASSIGN_ABORT_NOTICE } from '../src/editor/handles';
 import { TaskPaperSidebarView } from '../src/sidebar';
 import type TaskPaperPlugin from '../src/main';
 import type { TaskPaperView } from '../src/view';
@@ -301,6 +303,170 @@ function mouse(type: string, opts: MouseEventInit = {}): MouseEvent {
   check('escape removes the highlight', !workRow.classList.contains('tp-sb-drop-into'));
   window.dispatchEvent(mouse('mouseup'));
   check('the cancelled drag leaves the document unchanged', docText(fx.editor) === DOC);
+  fx.cleanup();
+}
+
+// ---------------------------------------------------------------------------
+// Tag drag-to-assign: editor handle drags dropped on sidebar tag rows
+// ---------------------------------------------------------------------------
+
+// alpha(2) carries duplicate @priority tags; gamma(6) already has the value.
+const TAG_DOC = [
+  'Home:',
+  '\t- alpha @priority(low) @priority(low)',
+  '\t\t- child of alpha',
+  '\t- beta',
+  'Work:',
+  '\t- gamma @priority(high)',
+  '\t- delta @flag',
+].join('\n');
+
+/** Sidebar + the injectable hit-test: y >= 100 "hovers" the `hover` element. */
+function mountTagFixture() {
+  let hover: Element | null = null;
+  const fx = mountSidebar(TAG_DOC, { elementFromPoint: (_x, y) => (y >= 100 ? hover : null) });
+  return {
+    ...fx,
+    setHover: (el: Element | null) => (hover = el),
+    tagRow: (name: string) =>
+      fx.sidebar.contentEl.querySelector<HTMLElement>(`.tp-sb-tag[data-tag-name="${name}"]`)!,
+    valueRow: (name: string, value: string) =>
+      fx.sidebar.contentEl.querySelector<HTMLElement>(
+        `.tp-sb-tag-value[data-tag-name="${name}"][data-tag-value="${value}"]`,
+      )!,
+    handle: (line: number) =>
+      fx.editor.dom.querySelector<HTMLElement>(`.tp-handle[data-line="${line}"]`)!,
+    lines: () => docText(fx.editor).split('\n'),
+  };
+}
+
+// --- tag rows render with data-tag-name / data-tag-value ---
+{
+  const fx = mountTagFixture();
+  check('tag name rows carry data-tag-name', fx.tagRow('priority') !== null && fx.tagRow('flag') !== null);
+  check(
+    'value rows carry data-tag-name + data-tag-value',
+    fx.valueRow('priority', 'low') !== null && fx.valueRow('priority', 'high') !== null,
+  );
+  check(
+    'a value-less tag renders no value rows',
+    fx.sidebar.contentEl.querySelector('.tp-sb-tag-value[data-tag-name="flag"]') === null,
+  );
+  fx.cleanup();
+}
+
+// --- dragging an item onto a VALUE row sets @tag(value) on that line only ---
+{
+  const fx = mountTagFixture();
+  const row = fx.valueRow('priority', 'high');
+  fx.handle(3).dispatchEvent(mouse('mousedown', { clientY: 0 })); // beta
+  // First hover a project row, then the value row: the highlights swap.
+  fx.setHover(fx.rows()[1]);
+  window.dispatchEvent(mouse('mousemove', { clientX: 10, clientY: 150 }));
+  check('a project row still highlights as a move target', fx.rows()[1].classList.contains('tp-sb-drop-into'));
+  fx.setHover(row);
+  window.dispatchEvent(mouse('mousemove', { clientX: 10, clientY: 150 }));
+  check('the value row highlights as an assign target', row.classList.contains('tp-sb-drop-assign'));
+  check('the project highlight cleared on leaving it', !fx.rows()[1].classList.contains('tp-sb-drop-into'));
+  check('the value row never gets the project drop class', !row.classList.contains('tp-sb-drop-into'));
+  check(
+    'the in-editor drop indicator hides over a tag row',
+    fx.editor.dom.querySelector('.tp-drop-indicator') === null,
+  );
+  window.dispatchEvent(mouse('mouseup'));
+  check('the dropped line gains @priority(high)', fx.lines()[3] === '\t- beta @priority(high)', fx.lines()[3]);
+  check(
+    'no other line changed and nothing moved',
+    fx.lines().length === 7 && fx.lines()[2] === '\t\t- child of alpha' && fx.lines()[5] === '\t- gamma @priority(high)',
+    docText(fx.editor),
+  );
+  check('the assign highlight clears after the drop', !row.classList.contains('tp-sb-drop-assign'));
+  check('a successful assign shows no notice', fx.host.notices.length === 0);
+  fx.cleanup();
+}
+
+// --- dropping onto a tag NAME row adds the bare tag (skip when present) ---
+{
+  const fx = mountTagFixture();
+  const row = fx.tagRow('priority');
+  fx.setHover(row);
+  fx.handle(6).dispatchEvent(mouse('mousedown', { clientY: 0 })); // delta
+  window.dispatchEvent(mouse('mousemove', { clientX: 10, clientY: 150 }));
+  check('the name row highlights as an assign target', row.classList.contains('tp-sb-drop-assign'));
+  window.dispatchEvent(mouse('mouseup'));
+  check('the bare tag lands after existing tags', fx.lines()[6] === '\t- delta @flag @priority', fx.lines()[6]);
+
+  // gamma already carries @priority — a name drop leaves its value alone.
+  fx.handle(5).dispatchEvent(mouse('mousedown', { clientY: 0 }));
+  window.dispatchEvent(mouse('mousemove', { clientX: 10, clientY: 150 }));
+  window.dispatchEvent(mouse('mouseup'));
+  check('an already-tagged line is skipped (value kept)', fx.lines()[5] === '\t- gamma @priority(high)', fx.lines()[5]);
+  fx.cleanup();
+}
+
+// --- duplicate same-name tags collapse to one on drop ---
+{
+  const fx = mountTagFixture();
+  fx.setHover(fx.valueRow('priority', 'high'));
+  fx.handle(1).dispatchEvent(mouse('mousedown', { clientY: 0 })); // alpha (dup @priority)
+  window.dispatchEvent(mouse('mousemove', { clientX: 10, clientY: 150 }));
+  window.dispatchEvent(mouse('mouseup'));
+  check('duplicate tags collapse to the one new value', fx.lines()[1] === '\t- alpha @priority(high)', fx.lines()[1]);
+  fx.cleanup();
+}
+
+// --- multi-select drag assigns to every selected ROOT, never descendants ---
+{
+  const fx = mountTagFixture();
+  const doc = fx.editor.state.doc;
+  // Two ranges: alpha + its child, and a cursor on beta.
+  fx.editor.dispatch({
+    selection: EditorSelection.create([
+      EditorSelection.range(doc.line(2).from, doc.line(3).to),
+      EditorSelection.cursor(doc.line(4).from),
+    ]),
+  });
+  fx.setHover(fx.valueRow('priority', 'high'));
+  fx.handle(1).dispatchEvent(mouse('mousedown', { clientY: 0 })); // alpha, inside the selection
+  window.dispatchEvent(mouse('mousemove', { clientX: 10, clientY: 150 }));
+  window.dispatchEvent(mouse('mouseup'));
+  check('every selected root is tagged (alpha)', fx.lines()[1] === '\t- alpha @priority(high)', fx.lines()[1]);
+  check('every selected root is tagged (beta)', fx.lines()[3] === '\t- beta @priority(high)', fx.lines()[3]);
+  check('a selected child is never retagged', fx.lines()[2] === '\t\t- child of alpha', fx.lines()[2]);
+  check('unselected lines stay untouched', fx.lines()[6] === '\t- delta @flag');
+  fx.cleanup();
+}
+
+// --- a document change mid-drag aborts the assignment with a notice ---
+{
+  const fx = mountTagFixture();
+  const row = fx.valueRow('priority', 'high');
+  fx.setHover(row);
+  fx.handle(3).dispatchEvent(mouse('mousedown', { clientY: 0 })); // beta
+  window.dispatchEvent(mouse('mousemove', { clientX: 10, clientY: 150 }));
+  check('assign target highlighted before the edit', row.classList.contains('tp-sb-drop-assign'));
+  fx.editor.dispatch({ changes: { from: 0, to: 0, insert: 'X' } }); // concurrent edit
+  check('the doc change aborts with the zh-TW notice', fx.host.notices.includes(DRAG_ASSIGN_ABORT_NOTICE), fx.host.notices.join('|'));
+  check('the abort clears the highlight', !row.classList.contains('tp-sb-drop-assign'));
+  window.dispatchEvent(mouse('mouseup'));
+  check('no tag was applied to the changed document', docText(fx.editor) === 'X' + TAG_DOC, docText(fx.editor));
+  check('exactly one abort notice', fx.host.notices.length === 1);
+  fx.cleanup();
+}
+
+// --- Escape cancels an assign drag silently ---
+{
+  const fx = mountTagFixture();
+  const row = fx.tagRow('flag');
+  fx.setHover(row);
+  fx.handle(3).dispatchEvent(mouse('mousedown', { clientY: 0 }));
+  window.dispatchEvent(mouse('mousemove', { clientX: 10, clientY: 150 }));
+  check('tag row highlighted mid-drag', row.classList.contains('tp-sb-drop-assign'));
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
+  check('escape removes the assign highlight', !row.classList.contains('tp-sb-drop-assign'));
+  window.dispatchEvent(mouse('mouseup'));
+  check('the cancelled assign changes nothing', docText(fx.editor) === TAG_DOC);
+  check('a cancelled assign shows no notice', fx.host.notices.length === 0);
   fx.cleanup();
 }
 

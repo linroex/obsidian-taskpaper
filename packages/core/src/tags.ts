@@ -4,6 +4,8 @@
  * A tag is `@name` optionally followed by a parenthesised value: `@name(value)`.
  * The value may contain escaped characters (`\)` etc.).
  */
+// Type-only import — repeat.ts imports back from this module at runtime.
+import type { LineChange } from './repeat';
 
 /** Global matcher for tags within a line. Group 1 = name, group 2 = raw value (or undefined). */
 export const TAG_RE = /@([A-Za-z0-9._-]+)(?:\(((?:\\.|[^)\\])*)\))?/g;
@@ -138,4 +140,54 @@ export function setTagValue(lineText: string, name: string, value?: string): str
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Plan assigning a tag to a set of root lines (sidebar drag-to-assign).
+ * `value === null` adds the bare tag — lines that already carry it keep
+ * their existing value; otherwise the value is set/replaced in place
+ * (setTagValue). Duplicate same-name tags on a touched line collapse to
+ * exactly one. Tag-only mutation: item positions never change.
+ */
+export function planAssignTag(
+  lines: string[],
+  rootLines: number[],
+  name: string,
+  value: string | null,
+): LineChange[] {
+  const changes: LineChange[] = [];
+  const seen = new Set<number>();
+  for (const line of [...rootLines].sort((a, b) => a - b)) {
+    if (seen.has(line) || line < 0 || line >= lines.length) {
+      continue;
+    }
+    seen.add(line);
+    const text = lines[line];
+    if (text.trim().length === 0) {
+      continue;
+    }
+    const next = assignTagLine(text, name, value);
+    if (next !== text) {
+      changes.push({ line, text: next });
+    }
+  }
+  return changes;
+}
+
+/** One line's assignment: duplicates collapse to the first occurrence, which
+ *  then keeps (bare drop) or takes (value drop) the value, in place. */
+function assignTagLine(text: string, name: string, value: string | null): string {
+  // Right-to-left removal keeps the earlier occurrences' offsets valid.
+  const dups = parseTags(text).filter((t) => t.name === name).slice(1);
+  let out = text;
+  for (const t of dups.reverse()) {
+    const eatBefore = t.start > 0 && out[t.start - 1] === ' ';
+    const start = eatBefore ? t.start - 1 : t.start;
+    const end = !eatBefore && out[t.end] === ' ' ? t.end + 1 : t.end;
+    out = out.slice(0, start) + out.slice(end);
+  }
+  if (value === null) {
+    return hasTag(out, name) ? out : addTag(out, name);
+  }
+  return setTagValue(out, name, value);
 }

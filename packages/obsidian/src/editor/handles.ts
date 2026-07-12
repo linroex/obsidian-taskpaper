@@ -15,12 +15,15 @@ import {
   moveBranchAfter,
   moveBranchBefore,
   moveBranchToProject,
+  planAssignTag,
+  selectedRootLines,
   Outline,
 } from '@taskpaper/core';
 import { setFilterEffect } from './filter';
 import { foldedRangeAtLine, subtreeFoldRange } from './folding';
 import { docLines } from './outlineEdit';
 import { outlineOf, visibleItems, OUTLINE_TAB_SIZE } from './outline';
+import { selectedLineRanges } from './selection';
 
 // ---------------------------------------------------------------------------
 // Pure logic (testable)
@@ -158,12 +161,19 @@ function toggleHandleFold(view: EditorView, lineNo: number): void {
 /** CSS class marking the sidebar project row hovered during a handle drag. */
 const SIDEBAR_DROP_CLASS = 'tp-sb-drop-into';
 
+/** CSS class marking the sidebar tag name/value row hovered during a drag. */
+const SIDEBAR_ASSIGN_CLASS = 'tp-sb-drop-assign';
+
+/** Shown when a tag drop is aborted because the document changed mid-drag. */
+export const DRAG_ASSIGN_ABORT_NOTICE = '文件已變更，取消拖曳指派';
+
 /**
  * A live drag session started from a handle. Tracks the pointer, shows a drop
  * indicator, and on mouseup either commits the move (real drag) or reports a
  * plain click. Dragging over a sidebar project row (original TaskPaper 3:
  * drag items onto sidebar projects) highlights it and drops the branch INTO
- * that project. Escape cancels the whole gesture.
+ * that project; a sidebar tag name/value row instead assigns that tag to
+ * every dragged root. Escape cancels the whole gesture.
  */
 class HandleDrag {
   private indicator: HTMLElement | null = null;
@@ -175,7 +185,14 @@ class HandleDrag {
    *  committed while the document is still identical (edits between the last
    *  mousemove and mouseup would otherwise be overwritten). */
   private planDoc: Text;
-  /** The sidebar project row currently hovered (drop target), if any. */
+  /** The document at DRAG START — tag drops apply the captured roots and must
+   *  abort (with a notice) when the document is no longer this snapshot. */
+  private readonly startDoc: Text;
+  /** The root lines the drag carries: every selected root when the dragged
+   *  item is one of them (multi-select drag), else just the item's own line.
+   *  Snapshot at drag start; descendants are never retagged. */
+  private readonly dragRoots: number[];
+  /** The sidebar project/tag row currently hovered (drop target), if any. */
   private sidebarTarget: HTMLElement | null = null;
 
   private readonly onMove = (e: MouseEvent) => this.update(e);
@@ -194,12 +211,17 @@ class HandleDrag {
     startEvent: MouseEvent,
     /** Called once when the gesture ends without having dragged (= a click). */
     private onClick: () => void,
+    /** Shows a user-facing warning (a Notice in production). */
+    private notify: (message: string) => void,
     /** Hit-test hook (injectable for tests — jsdom's elementFromPoint returns null). */
     private hitTest: (x: number, y: number) => Element | null = (x, y) =>
       document.elementFromPoint(x, y),
   ) {
     this.startY = startEvent.clientY;
     this.planDoc = view.state.doc;
+    this.startDoc = view.state.doc;
+    const roots = selectedRootLines(outlineOf(view.state), selectedLineRanges(view.state), false);
+    this.dragRoots = roots.includes(itemLine) ? roots : [itemLine];
     window.addEventListener('mousemove', this.onMove);
     window.addEventListener('mouseup', this.onUp);
     window.addEventListener('keydown', this.onKey, true);
@@ -210,6 +232,16 @@ class HandleDrag {
     this.finish(false);
   }
 
+  /** The document changed mid-drag: the captured roots may no longer match.
+   *  A tag assignment in progress aborts loudly; other drags cancel silently
+   *  (project drops recompute from the fresh document anyway). */
+  docChanged(): void {
+    if (this.moved && this.sidebarTarget?.hasAttribute('data-tag-name')) {
+      this.notify(DRAG_ASSIGN_ABORT_NOTICE);
+    }
+    this.finish(false);
+  }
+
   private update(e: MouseEvent): void {
     if (Math.abs(e.clientY - this.startY) > 3) {
       this.moved = true;
@@ -217,10 +249,12 @@ class HandleDrag {
     if (!this.moved) {
       return;
     }
-    // Outside the editor the pointer may sit on a sidebar project row — then
-    // the row is the drop target and the in-editor indicator hides.
+    // Outside the editor the pointer may sit on a sidebar project or tag
+    // row — then the row is the drop target and the in-editor indicator hides.
     const hit = this.hitTest(e.clientX, e.clientY);
-    const row = (hit?.closest?.('.tp-sb-project') as HTMLElement | null) ?? null;
+    const row =
+      (hit?.closest?.('.tp-sb-project, .tp-sb-tag, .tp-sb-tag-value') as HTMLElement | null) ??
+      null;
     this.setSidebarTarget(row);
     if (row) {
       this.plan = null;
@@ -250,9 +284,10 @@ class HandleDrag {
     if (this.sidebarTarget === row) {
       return;
     }
-    this.sidebarTarget?.classList.remove(SIDEBAR_DROP_CLASS);
+    this.sidebarTarget?.classList.remove(SIDEBAR_DROP_CLASS, SIDEBAR_ASSIGN_CLASS);
     this.sidebarTarget = row;
-    row?.classList.add(SIDEBAR_DROP_CLASS);
+    // Distinct highlight per target type: tag rows assign, project rows move.
+    row?.classList.add(row.hasAttribute('data-tag-name') ? SIDEBAR_ASSIGN_CLASS : SIDEBAR_DROP_CLASS);
   }
 
   private drawIndicator(): void {
@@ -297,6 +332,10 @@ class HandleDrag {
       this.onClick();
       return;
     }
+    if (target?.hasAttribute('data-tag-name')) {
+      this.assignTag(target);
+      return;
+    }
     if (target) {
       // Dropped on a sidebar project row: move the branch INTO that project.
       // Computed fresh from the current document, so no staleness guard needed.
@@ -313,6 +352,38 @@ class HandleDrag {
     if (this.plan && this.view.state.doc.eq(this.planDoc)) {
       this.commitLines(this.plan.lines, this.plan.cursorLine);
     }
+  }
+
+  /** Dropped on a sidebar tag row: assign the tag to every dragged root —
+   *  value rows set `@name(value)`, name rows add the bare `@name`. Tag-only
+   *  mutation, applied as per-line changes in ONE transaction. STRICTER than
+   *  project drops: the roots were captured at drag start, so a document that
+   *  changed since then aborts instead of retagging the wrong lines. */
+  private assignTag(target: HTMLElement): void {
+    const name = target.getAttribute('data-tag-name');
+    if (!name) {
+      return;
+    }
+    if (!this.view.state.doc.eq(this.startDoc)) {
+      this.notify(DRAG_ASSIGN_ABORT_NOTICE);
+      return;
+    }
+    const changes = planAssignTag(
+      docLines(this.view.state),
+      this.dragRoots,
+      name,
+      target.getAttribute('data-tag-value'),
+    );
+    if (changes.length === 0) {
+      return;
+    }
+    const doc = this.view.state.doc;
+    this.view.dispatch({
+      changes: changes.map((c) => {
+        const line = doc.line(c.line + 1);
+        return { from: line.from, to: line.to, insert: c.text };
+      }),
+    });
   }
 
   /** Replace the whole document with `lines`, cursor at the start of `cursorLine`. */
@@ -336,6 +407,8 @@ export interface HandleOptions {
   hide(): boolean;
   /** Called after Alt-clicking a project's handle focused it. */
   onFocus(line: number): void;
+  /** Show a user-facing warning (a Notice in production). */
+  notify(message: string): void;
   /** Hit-test hook for drags over the sidebar (injectable for tests;
    *  defaults to document.elementFromPoint, which jsdom cannot provide). */
   elementFromPoint?(x: number, y: number): Element | null;
@@ -358,7 +431,7 @@ export function itemHandles(opts: HandleOptions) {
       }
       update(update: ViewUpdate) {
         if (update.docChanged && this.activeDrag) {
-          this.activeDrag.cancel();
+          this.activeDrag.docChanged();
           this.activeDrag = null;
         }
         if (update.docChanged || update.viewportChanged) {
@@ -406,6 +479,7 @@ export function itemHandles(opts: HandleOptions) {
             line,
             event,
             () => toggleHandleFold(view, line),
+            (message) => opts.notify(message),
             opts.elementFromPoint,
           );
           return true;

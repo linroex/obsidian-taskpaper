@@ -78,6 +78,7 @@ export function createEditorExtensions(host: EditorHost): Extension[] {
         host.setFocusedLine(line);
         host.refresh();
       },
+      notify: (message) => host.notify(message),
       elementFromPoint: host.elementFromPoint?.bind(host),
     }),
     tagAutocomplete,

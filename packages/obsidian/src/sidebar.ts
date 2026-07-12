@@ -335,7 +335,12 @@ export class TaskPaperSidebarView extends ItemView {
     const namesToValues = tagNamesToValues(ctx.outline);
     const valueCounts = tagValueCounts(ctx.outline);
     for (const [name, count] of sorted) {
-      const el = tagSection.createDiv({ cls: 'tp-sb-item tp-sb-tag' });
+      // data-tag-name/-value make tag rows drop targets for editor handle
+      // drags (drop = assign the tag) without ever parsing display text.
+      const el = tagSection.createDiv({
+        cls: 'tp-sb-item tp-sb-tag',
+        attr: { 'data-tag-name': name },
+      });
       const tagItem: SidebarSelectionItem = { kind: 'tag', query: `@${name}` };
       if (ctx.isRowSelected(tagItem)) {
         el.addClass('is-focused');
@@ -355,7 +360,10 @@ export class TaskPaperSidebarView extends ItemView {
           kind: 'tag',
           query: `@${name} contains[l] ${quoteQueryValue(value)}`,
         };
-        const vel = tagSection.createDiv({ cls: 'tp-sb-item tp-sb-tag-value' });
+        const vel = tagSection.createDiv({
+          cls: 'tp-sb-item tp-sb-tag-value',
+          attr: { 'data-tag-name': name, 'data-tag-value': value },
+        });
         if (ctx.isRowSelected(valueItem)) {
           vel.addClass('is-focused');
         }
