@@ -29,6 +29,8 @@ export interface RecordingHost extends EditorHost {
   docChanges: string[];
   /** Every link opened. */
   openedLinks: { href: string; kind: LinkKind }[];
+  /** Every wikilink opened (link text before `|`, e.g. `Note#h`). */
+  openedWikilinks: string[];
   /** How many times saveNow() ran (Mod-S / blur). */
   saves: number;
 }
@@ -50,6 +52,7 @@ export function mountEditor(
     searchbarUpdates: 0,
     docChanges: [],
     openedLinks: [],
+    openedWikilinks: [],
     saves: 0,
     hide: () => true,
     doneStamp: () => '2026-01-02',
@@ -68,6 +71,11 @@ export function mountEditor(
     },
     openLink(href, kind) {
       this.openedLinks.push({ href, kind });
+    },
+    // Default: nothing resolves — tests that need resolved wikilinks override.
+    resolveWikilink: () => false,
+    openWikilink(linktext) {
+      this.openedWikilinks.push(linktext);
     },
     saveNow() {
       this.saves++;

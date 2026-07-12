@@ -331,6 +331,75 @@ check('signature changes when file changes', sidebarSignature('a.taskpaper', 100
   check('md and bare links coexist sorted', mixed.length === 3 && mixed[2].text === 'https://b.io', JSON.stringify(mixed.map((l) => l.text)));
 }
 
+// --- wikilinks: [[Note]], [[Note|alias]], [[Note#heading]] ---
+{
+  const plain = findLinks('- see [[Note]] now');
+  check(
+    'wikilink yields one wiki entry spanning the brackets',
+    plain.length === 1 && plain[0].kind === 'wiki' && plain[0].start === 6 && plain[0].end === 14,
+    JSON.stringify(plain),
+  );
+  check('wikilink text/href is the note name', plain[0]?.text === 'Note' && linkHref(plain[0]) === 'Note');
+  check(
+    'wikilink without alias displays the inner text',
+    plain[0]?.display?.start === 8 && plain[0]?.display?.end === 12,
+    JSON.stringify(plain[0]?.display),
+  );
+
+  const alias = findLinks('- [[Note|別名]]');
+  check(
+    'aliased wikilink keeps the target as text, shows the alias',
+    alias[0]?.text === 'Note' &&
+      alias[0]?.display?.start === 9 &&
+      alias[0]?.display?.end === 11,
+    JSON.stringify(alias),
+  );
+  const multiPipe = findLinks('- [[Note|a|b]]');
+  check(
+    'only the first pipe splits target from alias',
+    multiPipe[0]?.text === 'Note' && multiPipe[0]?.display?.start === 9 && multiPipe[0]?.display?.end === 12,
+    JSON.stringify(multiPipe),
+  );
+
+  const heading = findLinks('- [[Note#Plan]] and [[Note#^abc]]');
+  check(
+    'heading and block refs stay in the link text',
+    heading.length === 2 && heading[0].text === 'Note#Plan' && heading[1].text === 'Note#^abc',
+    JSON.stringify(heading.map((l) => l.text)),
+  );
+
+  check('embed ![[Note]] is plain text', findLinks('- ![[Note]]').length === 0);
+  check('empty [[]] is plain text', findLinks('- [[]]').length === 0);
+  check('empty alias [[Note|]] is plain text', findLinks('- [[Note|]]').length === 0);
+  check('empty target [[|x]] is plain text', findLinks('- [[|x]]').length === 0);
+  check('unmatched [[Note is plain text', findLinks('- [[Note').length === 0);
+  check('nested brackets are plain text', findLinks('- [[a[b]]]').length === 0);
+
+  const two = findLinks('- [[a]] then [[b|c]]');
+  check('two wikilinks on one line', two.length === 2 && two[0].text === 'a' && two[1].text === 'b', JSON.stringify(two));
+
+  const nextToMd = findLinks('- [[wiki]] [md](https://a.io)');
+  check(
+    'wikilink coexists with a markdown link',
+    nextToMd.length === 3 && nextToMd[0].kind === 'wiki' && nextToMd[1].md === 'label',
+    JSON.stringify(nextToMd),
+  );
+  const wikiThenParen = findLinks('- [[a]](b)');
+  check(
+    '[[a]](b) is a wikilink plus plain text, not a markdown link',
+    wikiThenParen.length === 1 && wikiThenParen[0].kind === 'wiki' && wikiThenParen[0].text === 'a',
+    JSON.stringify(wikiThenParen),
+  );
+  const pathLike = findLinks('- [[notes/plan]]');
+  check(
+    'a path-like target stays one wikilink (no bare-path double match)',
+    pathLike.length === 1 && pathLike[0].kind === 'wiki' && pathLike[0].text === 'notes/plan',
+    JSON.stringify(pathLike),
+  );
+  const nextToTag = findLinks('- [[Note]] @due(2026-01-01)');
+  check('wikilink next to a tag stays a single link', nextToTag.length === 1 && nextToTag[0].kind === 'wiki');
+}
+
 // --- tag click: toggling the filter ---
 {
   const set = toggledTagFilter(null, 'today', true);

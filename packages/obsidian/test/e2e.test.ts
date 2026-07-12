@@ -25,7 +25,7 @@ import {
 } from './e2eHarness';
 import { foldedRanges } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
-import { Menu, Notice, setIcon } from 'obsidian';
+import { App, Menu, Notice, setIcon, TFile } from 'obsidian';
 import { filterSpecField } from '../src/editor/filter';
 
 let pass = 0;
@@ -246,6 +246,79 @@ const DOC = [
       host.openedLinks[0].href === 'https://example.com/spec' &&
       host.openedLinks[0].kind === 'url',
     JSON.stringify(host.openedLinks),
+  );
+  cleanup();
+}
+
+// --- wikilinks: live preview, resolved/unresolved classes, click routing ---
+{
+  // Resolution + opening wired through the obsidian stub, the way view.ts
+  // wires the production host (metadataCache / workspace.openLinkText).
+  const app = new App();
+  app.metadataCache.files.set('Note', new TFile('Note.md', 'Note', 'md'));
+  const { view, host, cleanup } = mountEditor('- read [[Note]] and [[Missing]]', {
+    resolveWikilink: (linkpath) =>
+      app.metadataCache.getFirstLinkpathDest(linkpath, 'test.taskpaper') !== null,
+    openWikilink: (linktext) => void app.workspace.openLinkText(linktext, 'test.taskpaper'),
+  });
+
+  const marks = findMark(view, 'tp-wikilink');
+  check('both wikilinks render marks', marks.length === 2, String(marks.length));
+  check(
+    'the resolved link carries data-href, no unresolved class',
+    marks[0].getAttribute('data-href') === 'Note' && !marks[0].classList.contains('tp-link-unresolved'),
+  );
+  check(
+    'the unresolved link is classed and carries no href',
+    marks[1].classList.contains('tp-link-unresolved') && marks[1].getAttribute('data-href') === null,
+  );
+  check(
+    'brackets are hidden while the cursor is outside',
+    view.contentDOM.textContent === '- read Note and Missing',
+    JSON.stringify(view.contentDOM.textContent),
+  );
+
+  clickEl(marks[0]);
+  check(
+    'clicking the resolved link records openLinkText in the stub',
+    app.workspace.openedLinkTexts.length === 1 &&
+      app.workspace.openedLinkTexts[0].linktext === 'Note' &&
+      app.workspace.openedLinkTexts[0].sourcePath === 'test.taskpaper',
+    JSON.stringify(app.workspace.openedLinkTexts),
+  );
+
+  clickEl(findMark(view, 'tp-link-unresolved')[0]);
+  check(
+    'clicking the unresolved link is a no-op',
+    app.workspace.openedLinkTexts.length === 1 && host.openedLinks.length === 0,
+  );
+
+  view.dispatch({ selection: { anchor: 9 } }); // inside [[Note]]
+  check(
+    'the raw syntax shows while the cursor is inside',
+    view.contentDOM.textContent === '- read [[Note]] and Missing',
+    JSON.stringify(view.contentDOM.textContent),
+  );
+  cleanup();
+}
+
+// --- wikilink alias display; coexists with md links and tags; embeds skipped ---
+{
+  const { view, cleanup } = mountEditor('- [[Note|別名]] [md](https://a.io) @due(2100-01-01)', {
+    resolveWikilink: () => true,
+  });
+  const wiki = findMark(view, 'tp-wikilink');
+  check('an aliased wikilink shows only the alias', wiki.length === 1 && wiki[0].textContent === '別名', wiki[0]?.textContent ?? '');
+  check('the adjacent markdown link still renders', findMark(view, 'tp-link').some((el) => el.textContent === 'md'));
+  check('the adjacent tag still renders', findMark(view, 'tp-tag').some((el) => el.getAttribute('data-tag') === 'due'));
+  cleanup();
+}
+{
+  const { view, cleanup } = mountEditor('- ![[Note]]', { resolveWikilink: () => true });
+  check(
+    'an embed is untouched (no mark, raw text)',
+    findMark(view, 'tp-wikilink').length === 0 && (view.contentDOM.textContent ?? '').includes('![[Note]]'),
+    JSON.stringify(view.contentDOM.textContent),
   );
   cleanup();
 }

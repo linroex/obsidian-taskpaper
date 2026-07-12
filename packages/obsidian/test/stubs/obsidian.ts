@@ -162,9 +162,20 @@ export class TFile {
   ) {}
 }
 
+export class MetadataCache {
+  /** linkpath → file mappings tests register; everything else is unresolved. */
+  files = new Map<string, TFile>();
+
+  getFirstLinkpathDest(linkpath: string, _sourcePath: string): TFile | null {
+    return this.files.get(linkpath) ?? null;
+  }
+}
+
 export class Workspace {
   private handlers = new Map<string, Array<(...args: unknown[]) => void>>();
   leaves: WorkspaceLeaf[] = [];
+  /** Every openLinkText call, for assertions. */
+  openedLinkTexts: { linktext: string; sourcePath: string }[] = [];
 
   on(name: string, cb: (...args: unknown[]) => void): { name: string; cb: unknown } {
     const list = this.handlers.get(name) ?? [];
@@ -187,6 +198,9 @@ export class Workspace {
     return new WorkspaceLeaf();
   }
   revealLeaf(_leaf: WorkspaceLeaf): void {}
+  async openLinkText(linktext: string, sourcePath: string): Promise<void> {
+    this.openedLinkTexts.push({ linktext, sourcePath });
+  }
 }
 
 export class Vault {
@@ -196,6 +210,7 @@ export class Vault {
 export class App {
   workspace = new Workspace();
   vault = new Vault();
+  metadataCache = new MetadataCache();
 }
 
 export class WorkspaceLeaf {
