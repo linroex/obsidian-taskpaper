@@ -1,0 +1,66 @@
+name: Release
+
+# Pushing a version tag (v0.1.0) builds the Obsidian plugin and publishes a
+# GitHub Release with the three installable assets. Tests gate the release.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify tag matches manifest version
+        run: |
+          MANIFEST_VERSION=$(node -p "require('./packages/obsidian/manifest.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$MANIFEST_VERSION" != "$TAG_VERSION" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match manifest version $MANIFEST_VERSION" >&2
+            exit 1
+          fi
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > /tmp/notes.md <<'NOTES'
+          TaskPaper 純文字任務管理 for Obsidian — 專案／任務／筆記／@標籤、完整 TaskPaper 查詢語言、側欄（專案・標籤・儲存搜尋）、搜尋列、行事曆檢視、封存、拖曳整理。
+
+          ## 安裝方式
+
+          **手動安裝**
+          1. 下載下方的 `main.js`、`manifest.json`、`styles.css`
+          2. 放進 vault 的 `.obsidian/plugins/taskpaper/` 目錄（沒有就建立）
+          3. 重新載入 Obsidian，在「設定 → 社群外掛」啟用 **TaskPaper**
+
+          **透過 BRAT**
+          1. 安裝 [BRAT](https://github.com/TfTHacker/obsidian42-brat) plugin
+          2. 「Add beta plugin」填入 `linroex/obsidian-taskpaper`
+          NOTES
+          gh release create "$GITHUB_REF_NAME" \
+            packages/obsidian/main.js \
+            packages/obsidian/manifest.json \
+            packages/obsidian/styles.css \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "TaskPaper for Obsidian $GITHUB_REF_NAME" \
+            --notes-file /tmp/notes.md
