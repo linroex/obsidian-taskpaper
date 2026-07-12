@@ -168,6 +168,52 @@ async function main(): Promise<void> {
     cleanup();
   }
 
+  // --- a `./`-prefixed inbox setting still matches the open view (normalizePath) ---
+  {
+    const { plugin, app, vault } = pluginWith({ inboxFile: './Inbox.taskpaper' });
+    await vault.create('Inbox.taskpaper', 'stale');
+    const { view, cleanup } = mountEditor('- a\n');
+    const tpView = Object.create(TaskPaperView.prototype) as TaskPaperView;
+    tpView.file = new TFile('Inbox.taskpaper', 'Inbox', 'taskpaper');
+    tpView.editor = view;
+    const leaf = new WorkspaceLeaf();
+    leaf.view = tpView;
+    app.workspace.leaves.push(leaf);
+
+    const commands = new TaskPaperCommands(plugin);
+    commands.quickCapture();
+    setInput('normalized');
+    pressKey('Enter');
+    await settle();
+    check(
+      'a ./-prefixed path is normalized before matching the open view',
+      docText(view) === '- a\n- normalized\n' && vault.contents.get('Inbox.taskpaper') === 'stale',
+      JSON.stringify(docText(view)),
+    );
+    cleanup();
+  }
+
+  // --- concurrent first captures serialize: both land, nothing is lost ---
+  {
+    const { plugin, vault } = pluginWith({ inboxFile: 'Fresh.taskpaper' });
+    const commands = new TaskPaperCommands(plugin);
+    // Two captures racing before the inbox exists (no await between them) —
+    // the queue must serialize the check-then-create so neither drops.
+    const both = Promise.all([
+      commands.captureToInbox('Fresh.taskpaper', '', '- first'),
+      commands.captureToInbox('Fresh.taskpaper', '', '- second'),
+    ]);
+    await both;
+    await settle();
+    const content = vault.contents.get('Fresh.taskpaper') ?? '';
+    check(
+      'concurrent captures both land in the new inbox',
+      content.includes('- first') && content.includes('- second'),
+      JSON.stringify(content),
+    );
+    check('the file was created exactly once', vault.created.length === 1, JSON.stringify(vault.created));
+  }
+
   // --- Escape cancels without writing ---
   {
     const { plugin, vault } = pluginWith({ inboxFile: 'Cancel.taskpaper' });

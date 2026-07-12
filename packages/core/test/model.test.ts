@@ -1299,6 +1299,11 @@ check('toggle from none focuses', toggleFocusTarget(null, 3) === 3);
     'capture: unresolvable date value is left as typed',
     normalizeCaptureText('a @due(sometime)', capNow) === '- a @due(sometime)',
   );
+  check(
+    'capture: a project with an escaped paren in a tag value stays a project',
+    normalizeCaptureText('X: @m(a \\) b)', capNow) === 'X: @m(a \\) b)',
+    normalizeCaptureText('X: @m(a \\) b)', capNow),
+  );
 }
 
 function setEq(a: Set<number>, b: Set<number>): boolean {

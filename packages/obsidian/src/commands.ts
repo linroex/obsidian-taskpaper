@@ -1,4 +1,4 @@
-import { Notice, TFile, TFolder } from 'obsidian';
+import { normalizePath, Notice, TFile, TFolder } from 'obsidian';
 import { ChangeSpec, EditorSelection, EditorState, StateEffect } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { foldAll, foldEffect, foldedRanges, unfoldAll, unfoldEffect } from '@codemirror/language';
@@ -653,37 +653,65 @@ export class TaskPaperCommands {
     view.editor.dispatch({ changes });
   }
 
+  /** Captures run one at a time — parallel first-captures would race the
+   *  check-then-create in ensureInboxFile and could drop a task. */
+  private captureQueue: Promise<void> = Promise.resolve();
+
   /** 快速新增任務 — prompt for one line and append it to the inbox file. */
   quickCapture(): void {
-    const file = this.settings.inboxFile.trim() || 'Inbox.taskpaper';
+    const file = normalizePath(this.settings.inboxFile.trim() || 'Inbox.taskpaper');
     const project = this.settings.inboxProject.trim();
     new CaptureModal(this.plugin.app, file, project, (taskLine) => {
       void this.captureToInbox(file, project, taskLine);
     }).open();
   }
 
-  async captureToInbox(path: string, project: string, taskLine: string): Promise<void> {
-    // A TaskPaper view with the inbox open may hold unsaved edits — dispatch
-    // into that editor instead of racing vault.process against them.
+  captureToInbox(path: string, project: string, taskLine: string): Promise<void> {
+    this.captureQueue = this.captureQueue.then(
+      () => this.doCapture(path, project, taskLine),
+      () => this.doCapture(path, project, taskLine),
+    );
+    this.captureQueue = this.captureQueue.catch((err) => {
+      new Notice(`無法加入 ${path}：${err instanceof Error ? err.message : String(err)}`);
+    });
+    return this.captureQueue;
+  }
+
+  /** A TaskPaper view with the inbox open may hold unsaved edits — captures
+   *  must dispatch into that editor instead of racing vault.process. */
+  private openInboxEditor(path: string): EditorView | null {
     for (const leaf of this.plugin.app.workspace.getLeavesOfType(VIEW_TYPE_TASKPAPER)) {
       const view = leaf.view;
       if (view instanceof TaskPaperView && view.file?.path === path && view.editor) {
-        this.captureIntoEditor(view.editor, taskLine, project);
+        return view.editor;
+      }
+    }
+    return null;
+  }
+
+  private async doCapture(path: string, project: string, taskLine: string): Promise<void> {
+    let editor = this.openInboxEditor(path);
+    if (!editor) {
+      const file = await this.ensureInboxFile(path);
+      if (!file) {
+        return;
+      }
+      // A view may have opened the inbox while we were creating it — re-check
+      // so we never process the vault copy behind a live editor's back.
+      editor = this.openInboxEditor(path);
+      if (!editor) {
+        await this.plugin.app.vault.process(file, (data) => {
+          // Re-plan on the fresh content INSIDE the callback (process may rerun it).
+          const lines = data.split('\n');
+          const plan = planCapture(lines, taskLine, project, OUTLINE_TAB_SIZE);
+          lines.splice(plan.insertLine, 0, ...plan.insertText.split('\n'));
+          return lines.join('\n');
+        });
         new Notice(`已加入 ${path}`);
         return;
       }
     }
-    const file = await this.ensureInboxFile(path);
-    if (!file) {
-      return;
-    }
-    await this.plugin.app.vault.process(file, (data) => {
-      // Re-plan on the fresh content INSIDE the callback (process may rerun it).
-      const lines = data.split('\n');
-      const plan = planCapture(lines, taskLine, project, OUTLINE_TAB_SIZE);
-      lines.splice(plan.insertLine, 0, ...plan.insertText.split('\n'));
-      return lines.join('\n');
-    });
+    this.captureIntoEditor(editor, taskLine, project);
     new Notice(`已加入 ${path}`);
   }
 

@@ -138,6 +138,15 @@ export function setIcon(el: HTMLElement, icon: string): void {
   el.setAttribute('data-icon', icon);
 }
 
+/** Obsidian's path normalization: forward slashes, no leading `./`, trimmed. */
+export function normalizePath(path: string): string {
+  return path
+    .replace(/\\/g, '/')
+    .replace(/\/{2,}/g, '/')
+    .replace(/^\.\//, '')
+    .replace(/^\/+|\/+$/g, '');
+}
+
 export class Notice {
   static messages: string[] = [];
   constructor(message: string) {

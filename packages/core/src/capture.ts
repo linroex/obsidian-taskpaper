@@ -122,7 +122,10 @@ export function normalizeCaptureText(text: string, now: Date = new Date()): stri
   if (line.length === 0) {
     return '';
   }
-  if (lineKind(line) === 'note') {
+  // Project detection must be escape-aware: lineKind's project regex doesn't
+  // understand `\)` inside tag values, but stripTags does — `X: @m(a \) b)`
+  // stays a project, not a task.
+  if (lineKind(line) === 'note' && !stripTags(line).trimEnd().endsWith(':')) {
     line = '- ' + line;
   }
   return line.replace(/(@(?:due|start|defer))\(([^)]*)\)/g, (full, name: string, value: string) => {
