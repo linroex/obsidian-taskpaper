@@ -58,6 +58,27 @@ function toOffsets(state: EditorState, range: SelectionRange): OffsetRange {
   };
 }
 
+/** Every selection range as a merged, ascending list of 0-based line spans —
+ *  multi-cursor selections operate on each span, not the min..max hull. */
+export function selectedLineRanges(state: EditorState): Array<[number, number]> {
+  const spans = state.selection.ranges
+    .map((r): [number, number] => [
+      state.doc.lineAt(r.from).number - 1,
+      state.doc.lineAt(r.to).number - 1,
+    ])
+    .sort((a, b) => a[0] - b[0]);
+  const merged: Array<[number, number]> = [];
+  for (const span of spans) {
+    const last = merged[merged.length - 1];
+    if (last && span[0] <= last[1] + 1) {
+      last[1] = Math.max(last[1], span[1]);
+    } else {
+      merged.push([span[0], span[1]]);
+    }
+  }
+  return merged;
+}
+
 function dispatchRange(view: EditorView, range: OffsetRange): void {
   view.dispatch({
     selection: EditorSelection.range(range.anchor, range.head),

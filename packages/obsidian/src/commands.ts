@@ -44,7 +44,7 @@ import {
 } from './editor/folding';
 import { applyOutlineOp, dispatchOutlineEdit, docLines } from './editor/outlineEdit';
 import { copyDisplayed } from './editor/copyDisplayed';
-import { contractSelection, expandSelection, selectBranch } from './editor/selection';
+import { contractSelection, expandSelection, selectBranch, selectedLineRanges } from './editor/selection';
 import { toggleDoneSelection } from './editor/toggleDone';
 import { collectTagNames } from './editor/tagComplete';
 import {
@@ -843,26 +843,5 @@ function selectedLineRange(state: EditorState): [number, number] {
     end = Math.max(end, state.doc.lineAt(range.to).number - 1);
   }
   return [start, end];
-}
-
-/** Every selection range as a merged, ascending list of 0-based line spans —
- *  multi-cursor selections operate on each span, not the min..max hull. */
-function selectedLineRanges(state: EditorState): Array<[number, number]> {
-  const spans = state.selection.ranges
-    .map((r): [number, number] => [
-      state.doc.lineAt(r.from).number - 1,
-      state.doc.lineAt(r.to).number - 1,
-    ])
-    .sort((a, b) => a[0] - b[0]);
-  const merged: Array<[number, number]> = [];
-  for (const span of spans) {
-    const last = merged[merged.length - 1];
-    if (last && span[0] <= last[1] + 1) {
-      last[1] = Math.max(last[1], span[1]);
-    } else {
-      merged.push([span[0], span[1]]);
-    }
-  }
-  return merged;
 }
 

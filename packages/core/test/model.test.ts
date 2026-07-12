@@ -1,7 +1,7 @@
 import { buildOutline } from '../src/model';
 import { runQuery } from '../src/query/evaluator';
 import { quoteQueryValue } from '../src/query/lexer';
-import { addTag, removeTag, removeAllTags, hasTag, todayStamp, toggleDoneLine } from '../src/tags';
+import { addTag, planAssignTag, removeTag, removeAllTags, hasTag, todayStamp, toggleDoneLine } from '../src/tags';
 import { parseDate, resolveDateExpression } from '../src/dates';
 import {
   moveItemUp,
@@ -1197,6 +1197,73 @@ check('toggle from none focuses', toggleFocusTarget(null, 3) === 3);
   {
     const plan = planToggleDone(['- plain @due(2026-07-01)'], [0], repOpts);
     check('plan: no @repeat means no spawn', plan.changes.length === 1 && plan.inserts.length === 0 && plan.notices.length === 0);
+  }
+}
+
+// --- drag-to-assign: planAssignTag ---
+{
+  // Value drop on an untagged line appends @name(value).
+  check(
+    'assign: value drop adds the tag',
+    JSON.stringify(planAssignTag(['\t- a'], [0], 'priority', 'high')) ===
+      JSON.stringify([{ line: 0, text: '\t- a @priority(high)' }]),
+    JSON.stringify(planAssignTag(['\t- a'], [0], 'priority', 'high')),
+  );
+
+  // Value drop replaces an existing value IN PLACE (setTagValue semantics).
+  check(
+    'assign: value drop replaces in place',
+    planAssignTag(['- a @priority(low) tail'], [0], 'priority', 'high')[0].text ===
+      '- a @priority(high) tail',
+    JSON.stringify(planAssignTag(['- a @priority(low) tail'], [0], 'priority', 'high')),
+  );
+
+  // Name drop adds the bare tag; an already-present tag keeps its value.
+  check(
+    'assign: name drop adds the bare tag',
+    planAssignTag(['- a'], [0], 'flag', null)[0].text === '- a @flag',
+    JSON.stringify(planAssignTag(['- a'], [0], 'flag', null)),
+  );
+  check(
+    'assign: name drop skips a line already tagged (value kept)',
+    planAssignTag(['- a @priority(low)'], [0], 'priority', null).length === 0,
+  );
+
+  // Duplicate same-name tags collapse to exactly one, on both drop kinds.
+  check(
+    'assign: value drop collapses duplicates',
+    planAssignTag(['- a @p(1) mid @p(2)'], [0], 'p', 'x')[0].text === '- a @p(x) mid',
+    JSON.stringify(planAssignTag(['- a @p(1) mid @p(2)'], [0], 'p', 'x')),
+  );
+  check(
+    'assign: name drop collapses duplicates keeping the first value',
+    planAssignTag(['- a @p(1) @p(2) @p'], [0], 'p', null)[0].text === '- a @p(1)',
+    JSON.stringify(planAssignTag(['- a @p(1) @p(2) @p'], [0], 'p', null)),
+  );
+
+  // Values with parens/backslashes are escaped exactly like formatTag does.
+  check(
+    'assign: value with parens is escaped',
+    planAssignTag(['- a'], [0], 't', 'a(b)')[0].text === '- a @t(a\\(b\\))',
+    JSON.stringify(planAssignTag(['- a'], [0], 't', 'a(b)')),
+  );
+  check(
+    'assign: escaped existing value is replaced cleanly',
+    planAssignTag(['- a @t(x\\)y)'], [0], 't', 'z')[0].text === '- a @t(z)',
+    JSON.stringify(planAssignTag(['- a @t(x\\)y)'], [0], 't', 'z')),
+  );
+
+  // Multi-root: only the listed roots change; descendants are never touched;
+  // duplicates / out-of-range / blank root lines are ignored; unchanged
+  // lines produce no LineChange.
+  {
+    const doc = ['P:', '\t- a', '\t\t- child', '\t- b @p(high)', ''];
+    const plan = planAssignTag(doc, [1, 3, 3, 4, 99, -1], 'p', 'high');
+    check(
+      'assign: multi-root touches exactly the changed roots',
+      JSON.stringify(plan) === JSON.stringify([{ line: 1, text: '\t- a @p(high)' }]),
+      JSON.stringify(plan),
+    );
   }
 }
 
