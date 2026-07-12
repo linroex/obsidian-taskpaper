@@ -5,3 +5,4 @@ packages/obsidian/out-test/
 *.vsix
 .DS_Store
 packages/core/out-test/
+.claude/

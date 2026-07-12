@@ -7,7 +7,7 @@ import { filterSpecField, searchbarText, setFilterEffect } from './editor/filter
 import { createEditorExtensions } from './editor/setup';
 import { CalendarPane } from './calendarPane';
 import type { SidebarSelectionItem } from './sidebarLogic';
-import type { LinkKind } from './editor/links';
+import { refreshLinks, type LinkKind } from './editor/links';
 import type TaskPaperPlugin from './main';
 
 export const VIEW_TYPE_TASKPAPER = 'taskpaper-view';
@@ -60,6 +60,18 @@ export class TaskPaperView extends TextFileView {
     );
     this.addAction('archive', 'Archive done items', () =>
       this.plugin.commands.archiveDone(this),
+    );
+    // Wikilink resolved/unresolved styling depends on which notes exist —
+    // re-decorate when the vault's link index changes (create/rename/delete).
+    this.registerEvent(
+      this.app.metadataCache.on('resolved', () =>
+        this.editor?.dispatch({ effects: refreshLinks.of(null) }),
+      ),
+    );
+    this.registerEvent(
+      this.app.metadataCache.on('deleted', () =>
+        this.editor?.dispatch({ effects: refreshLinks.of(null) }),
+      ),
     );
   }
 

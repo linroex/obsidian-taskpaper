@@ -398,6 +398,16 @@ check('signature changes when file changes', sidebarSignature('a.taskpaper', 100
   );
   const nextToTag = findLinks('- [[Note]] @due(2026-01-01)');
   check('wikilink next to a tag stays a single link', nextToTag.length === 1 && nextToTag[0].kind === 'wiki');
+
+  check('escaped \\[[Note]] is plain text', findLinks('- \\[[Note]]').length === 0);
+  check('bracket run [[[Note]]] is plain text', findLinks('- [[[Note]]]').length === 0);
+  check('bracket run [[Note]]] is plain text', findLinks('- [[Note]]]').length === 0);
+  const wikiInUrl = findLinks('- https://example.com/[[Note]]');
+  check(
+    'a wikilink inside a bare URL yields the URL, not a wikilink',
+    wikiInUrl.length === 1 && wikiInUrl[0].kind === 'url',
+    JSON.stringify(wikiInUrl),
+  );
 }
 
 // --- tag click: toggling the filter ---

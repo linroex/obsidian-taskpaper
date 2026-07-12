@@ -165,9 +165,23 @@ export class TFile {
 export class MetadataCache {
   /** linkpath → file mappings tests register; everything else is unresolved. */
   files = new Map<string, TFile>();
+  private handlers = new Map<string, Array<(...args: unknown[]) => void>>();
 
   getFirstLinkpathDest(linkpath: string, _sourcePath: string): TFile | null {
     return this.files.get(linkpath) ?? null;
+  }
+
+  on(name: string, cb: (...args: unknown[]) => void): { name: string; cb: unknown } {
+    const list = this.handlers.get(name) ?? [];
+    list.push(cb);
+    this.handlers.set(name, list);
+    return { name, cb };
+  }
+
+  trigger(name: string, ...args: unknown[]): void {
+    for (const cb of this.handlers.get(name) ?? []) {
+      cb(...args);
+    }
   }
 }
 

@@ -1,6 +1,10 @@
-import { Extension, RangeSetBuilder } from '@codemirror/state';
+import { Extension, RangeSetBuilder, StateEffect } from '@codemirror/state';
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate } from '@codemirror/view';
 import { parseTags } from '@taskpaper/core';
+
+/** Dispatched by the host when note metadata changes (create/rename/delete),
+ *  so wikilink resolved/unresolved styling doesn't go stale. */
+export const refreshLinks = StateEffect.define<null>();
 
 export type LinkKind = 'url' | 'www' | 'email' | 'file' | 'path' | 'scheme' | 'wiki';
 
@@ -53,15 +57,34 @@ function classifyTarget(target: string): LinkKind {
 export function findLinks(lineText: string): LinkRange[] {
   const links: LinkRange[] = [];
 
-  // Wikilinks first — their spans suppress the markdown-link and raw-URL
+  // Bare URLs win over wikilinks embedded in them: `https://x.com/[[a]]` is
+  // one clickable URL, not a wikilink surrounded by URL fragments.
+  const urlSpans: { start: number; end: number }[] = [];
+  const URL_SPAN_RE = /(?:https?|file):\/\/[^\s]+|www\.[^\s]+/g;
+  let us: RegExpExecArray | null;
+  while ((us = URL_SPAN_RE.exec(lineText))) {
+    urlSpans.push({ start: us.index, end: us.index + us[0].length });
+  }
+
+  // Wikilinks next — their spans suppress the markdown-link and raw-URL
   // scans below (`[[a]](b)` is a wikilink plus plain text, and a path-like
   // target such as `[[notes/plan]]` must not also match as a bare path).
   const wikiSpans: { start: number; end: number }[] = [];
   WIKI_LINK_RE.lastIndex = 0;
   let wl: RegExpExecArray | null;
   while ((wl = WIKI_LINK_RE.exec(lineText))) {
-    // `![[Note]]` is embed syntax — leave it as plain text (never a link).
-    if (wl.index > 0 && lineText[wl.index - 1] === '!') {
+    // `![[Note]]` is embed syntax and `\[[Note]]` is escaped — plain text.
+    if (wl.index > 0 && /[!\\]/.test(lineText[wl.index - 1])) {
+      continue;
+    }
+    // Part of a malformed bracket run (`[[[Note]]]`) — plain text.
+    if (
+      (wl.index > 0 && lineText[wl.index - 1] === '[') ||
+      lineText[wl.index + wl[0].length] === ']'
+    ) {
+      continue;
+    }
+    if (urlSpans.some((r) => wl!.index < r.end && wl!.index + wl![0].length > r.start)) {
       continue;
     }
     const inner = wl[1];
@@ -301,7 +324,10 @@ const linkDecorations = (resolveWiki: (linkpath: string) => boolean) =>
         this.decorations = buildLinkDecorations(view, resolveWiki);
       }
       update(update: ViewUpdate) {
-        if (update.docChanged || update.viewportChanged || update.selectionSet) {
+        const metadataChanged = update.transactions.some((tr) =>
+          tr.effects.some((e) => e.is(refreshLinks)),
+        );
+        if (update.docChanged || update.viewportChanged || update.selectionSet || metadataChanged) {
           this.decorations = buildLinkDecorations(update.view, resolveWiki);
         }
       }

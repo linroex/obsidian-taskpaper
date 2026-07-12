@@ -314,7 +314,8 @@ body.taskpaper-no-strike .tp-done {
 
 /* Unresolved [[wikilink]] — dimmer, like Obsidian's unresolved links.
  * Clicking it is a no-op (never creates a note), so no pointer cursor. */
-.tp-link-unresolved {
+.tp-link-unresolved,
+.tp-link.tp-link-unresolved:hover {
   color: var(--link-unresolved-color, color-mix(in srgb, var(--text-accent) 55%, transparent));
   text-decoration-color: var(
     --link-unresolved-color,

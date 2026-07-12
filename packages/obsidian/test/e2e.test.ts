@@ -27,6 +27,7 @@ import { foldedRanges } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
 import { App, Menu, Notice, setIcon, TFile } from 'obsidian';
 import { filterSpecField } from '../src/editor/filter';
+import { refreshLinks } from '../src/editor/links';
 
 let pass = 0;
 let fail = 0;
@@ -319,6 +320,28 @@ const DOC = [
     'an embed is untouched (no mark, raw text)',
     findMark(view, 'tp-wikilink').length === 0 && (view.contentDOM.textContent ?? '').includes('![[Note]]'),
     JSON.stringify(view.contentDOM.textContent),
+  );
+  cleanup();
+}
+
+// --- wikilink resolution updates when the vault's link index changes ---
+{
+  const app = new App();
+  const { view, cleanup } = mountEditor('- read [[Later]]', {
+    resolveWikilink: (linkpath) =>
+      app.metadataCache.getFirstLinkpathDest(linkpath, 'test.taskpaper') !== null,
+  });
+  check('the note is unresolved at first', findMark(view, 'tp-link-unresolved').length === 1);
+
+  // The note gets created: view.ts listens for metadataCache 'resolved' and
+  // dispatches refreshLinks — simulate that exact wiring.
+  app.metadataCache.files.set('Later', new TFile('Later.md', 'Later', 'md'));
+  app.metadataCache.on('resolved', () => view.dispatch({ effects: refreshLinks.of(null) }));
+  app.metadataCache.trigger('resolved');
+  check(
+    'the link re-resolves after the metadata refresh effect',
+    findMark(view, 'tp-link-unresolved').length === 0 &&
+      findMark(view, 'tp-wikilink')[0]?.getAttribute('data-href') === 'Later',
   );
   cleanup();
 }
