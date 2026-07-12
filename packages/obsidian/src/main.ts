@@ -2,6 +2,7 @@ import { Plugin, WorkspaceLeaf } from 'obsidian';
 import { documentCounts } from '@taskpaper/core';
 import { TaskPaperView, VIEW_TYPE_TASKPAPER } from './view';
 import { TaskPaperSidebarView, VIEW_TYPE_SIDEBAR } from './sidebar';
+import { TaskPaperCalendarView, VIEW_TYPE_CALENDAR } from './calendarView';
 import { TaskPaperCommands } from './commands';
 import { outlineOf } from './editor/outline';
 import { DEFAULT_SETTINGS, TaskPaperSettings, TaskPaperSettingTab } from './settings';
@@ -23,6 +24,10 @@ export default class TaskPaperPlugin extends Plugin {
       VIEW_TYPE_SIDEBAR,
       (leaf: WorkspaceLeaf) => new TaskPaperSidebarView(leaf, this),
     );
+    this.registerView(
+      VIEW_TYPE_CALENDAR,
+      (leaf: WorkspaceLeaf) => new TaskPaperCalendarView(leaf, this),
+    );
     try {
       this.registerExtensions(['taskpaper'], VIEW_TYPE_TASKPAPER);
     } catch (e) {
@@ -42,6 +47,7 @@ export default class TaskPaperPlugin extends Plugin {
     );
 
     this.addRibbonIcon('list-checks', 'TaskPaper sidebar', () => this.activateSidebar());
+    this.addRibbonIcon('calendar-days', 'TaskPaper calendar', () => this.activateCalendar());
     this.addSettingTab(new TaskPaperSettingTab(this.app, this));
     this.applyBodyClasses();
     this.registerCommands();
@@ -55,11 +61,17 @@ export default class TaskPaperPlugin extends Plugin {
     return this.app.workspace.getActiveViewOfType(TaskPaperView);
   }
 
-  /** Re-render any open sidebar panels + the status bar (called after edits). */
+  /** Re-render any open sidebar/calendar panels + the status bar (called after edits). */
   refreshSidebar(): void {
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_SIDEBAR)) {
       const view = leaf.view;
       if (view instanceof TaskPaperSidebarView) {
+        view.render(true);
+      }
+    }
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_CALENDAR)) {
+      const view = leaf.view;
+      if (view instanceof TaskPaperCalendarView) {
         view.render(true);
       }
     }
@@ -107,6 +119,18 @@ export default class TaskPaperPlugin extends Plugin {
       return;
     }
     await leaf.setViewState({ type: VIEW_TYPE_SIDEBAR, active: true });
+    this.app.workspace.revealLeaf(leaf);
+  }
+
+  /** Open the calendar as a MAIN workspace tab, reusing an existing leaf. */
+  async activateCalendar(): Promise<void> {
+    const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_CALENDAR);
+    if (existing.length > 0) {
+      this.app.workspace.revealLeaf(existing[0]);
+      return;
+    }
+    const leaf = this.app.workspace.getLeaf('tab');
+    await leaf.setViewState({ type: VIEW_TYPE_CALENDAR, active: true });
     this.app.workspace.revealLeaf(leaf);
   }
 
@@ -191,6 +215,11 @@ export default class TaskPaperPlugin extends Plugin {
       id: 'open-sidebar',
       name: 'Open sidebar (projects & tags)',
       callback: () => this.activateSidebar(),
+    });
+    this.addCommand({
+      id: 'open-calendar',
+      name: 'Open calendar',
+      callback: () => this.activateCalendar(),
     });
   }
 

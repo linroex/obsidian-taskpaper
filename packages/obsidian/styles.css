@@ -594,3 +594,211 @@ body.taskpaper-no-strike .tp-done {
 .tp-setting-global-search .setting-item-control input[type='text'] {
   flex: 1;
 }
+
+/* ---- Calendar view ---- */
+.taskpaper-calendar {
+  --tp-secondary: color-mix(in srgb, var(--text-normal) 72%, transparent);
+  --tp-tertiary: color-mix(in srgb, var(--text-normal) 52%, transparent);
+  /* Semantic occurrence colors, theme-derived where a native var exists. */
+  --tp-cal-due: var(--interactive-accent);
+  --tp-cal-today: var(--color-green, #2ea04b);
+  --tp-cal-overdue: var(--color-red, #e03131);
+  --tp-cal-completed: var(--tp-tertiary);
+  display: flex;
+  flex-direction: column;
+  padding: var(--size-4-3);
+  overflow-y: auto;
+}
+
+.taskpaper-calendar .tp-cal-empty {
+  color: var(--tp-tertiary);
+  text-align: center;
+  padding: var(--size-4-8) 0;
+}
+
+/* Header: source file + toolbar. */
+.taskpaper-calendar .tp-cal-file {
+  font-weight: 600;
+  font-size: var(--font-ui-medium);
+  margin-bottom: var(--size-4-1);
+}
+
+.taskpaper-calendar .tp-cal-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-1);
+  margin-bottom: var(--size-4-2);
+}
+
+.taskpaper-calendar .tp-cal-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  font-size: var(--font-ui-small);
+}
+
+.taskpaper-calendar .tp-cal-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.taskpaper-calendar .tp-cal-month-label {
+  font-weight: 600;
+  margin-left: var(--size-4-2);
+}
+
+.taskpaper-calendar .tp-cal-toolbar-right {
+  margin-left: auto;
+  display: flex;
+  gap: var(--size-4-1);
+}
+
+.taskpaper-calendar .tp-cal-done-toggle.is-active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+/* Month grid: 7 columns, weekday header row then day cells. */
+.taskpaper-calendar .tp-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--background-modifier-border);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  overflow: hidden;
+}
+
+.taskpaper-calendar .tp-cal-weekday {
+  background: var(--background-secondary);
+  color: var(--tp-secondary);
+  font-size: var(--font-ui-smaller);
+  text-align: center;
+  padding: var(--size-4-1) 0;
+}
+
+.taskpaper-calendar .tp-cal-day {
+  background: var(--background-primary);
+  min-height: 5.5em;
+  padding: 3px 4px;
+  font-size: var(--font-ui-smaller);
+}
+
+.taskpaper-calendar .tp-cal-day.is-outside {
+  background: var(--background-secondary);
+}
+
+.taskpaper-calendar .tp-cal-day.is-outside .tp-cal-day-num {
+  color: var(--tp-tertiary);
+}
+
+.taskpaper-calendar .tp-cal-day.is-today {
+  background: var(--background-modifier-hover);
+  box-shadow: inset 0 2px 0 var(--interactive-accent);
+}
+
+.taskpaper-calendar .tp-cal-day.is-today .tp-cal-day-num {
+  color: var(--interactive-accent);
+  font-weight: 700;
+}
+
+.taskpaper-calendar .tp-cal-day-num {
+  color: var(--tp-secondary);
+  margin-bottom: 2px;
+}
+
+/* One occurrence row: dot + truncated title (+ muted breadcrumb in agenda). */
+.taskpaper-calendar .tp-cal-occ {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 1px 3px;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.taskpaper-calendar .tp-cal-occ:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.taskpaper-calendar .tp-cal-occ-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskpaper-calendar .tp-cal-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  align-self: center;
+}
+
+.taskpaper-calendar .tp-cal-dot-due {
+  background: var(--tp-cal-due);
+}
+
+.taskpaper-calendar .tp-cal-dot-today {
+  background: var(--tp-cal-today);
+}
+
+.taskpaper-calendar .tp-cal-dot-overdue {
+  background: var(--tp-cal-overdue);
+}
+
+.taskpaper-calendar .tp-cal-dot-completed {
+  background: var(--tp-cal-completed);
+}
+
+.taskpaper-calendar .tp-cal-occ .tp-cal-dot-completed + .tp-cal-occ-text {
+  color: var(--tp-tertiary);
+  text-decoration: line-through;
+}
+
+.taskpaper-calendar .tp-cal-more {
+  color: var(--tp-tertiary);
+  padding-left: 15px;
+}
+
+/* Agenda list. */
+.taskpaper-calendar .tp-cal-agenda {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-3);
+}
+
+.taskpaper-calendar .tp-cal-section-heading {
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--tp-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding-bottom: 2px;
+  margin-bottom: var(--size-4-1);
+}
+
+.taskpaper-calendar .tp-cal-overdue .tp-cal-section-heading {
+  color: var(--tp-cal-overdue);
+  border-bottom-color: color-mix(in srgb, var(--tp-cal-overdue) 40%, transparent);
+}
+
+.taskpaper-calendar .tp-cal-agenda .tp-cal-occ {
+  font-size: var(--font-ui-small);
+  padding: 3px 6px;
+}
+
+.taskpaper-calendar .tp-cal-occ-path {
+  flex: none;
+  margin-left: auto;
+  padding-left: var(--size-4-2);
+  color: var(--tp-tertiary);
+  font-size: var(--font-ui-smaller);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45%;
+}
