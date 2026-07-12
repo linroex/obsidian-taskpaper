@@ -36,6 +36,37 @@
   display: none;
 }
 
+/* Split mode: drag the divider to show the editor above the calendar. */
+.taskpaper-view.is-calendar-mode.has-split .cm-editor,
+.taskpaper-view.is-calendar-mode.has-split .tp-searchbar {
+  display: flex;
+}
+
+.taskpaper-view.is-calendar-mode.has-split .cm-editor {
+  flex: var(--tp-split, 0.5) 1 0;
+}
+
+.taskpaper-view.is-calendar-mode.has-split .tp-cal-embedded {
+  flex: calc(1 - var(--tp-split, 0.5)) 1 0;
+}
+
+.tp-cal-divider {
+  display: none;
+  height: 5px;
+  flex: 0 0 auto;
+  cursor: row-resize;
+  background: var(--background-modifier-border);
+}
+
+.tp-cal-divider:hover,
+.tp-cal-divider.is-dragging {
+  background: var(--interactive-accent);
+}
+
+.taskpaper-view.is-calendar-mode .tp-cal-divider {
+  display: block;
+}
+
 /* The original app's searchbar: shown while a filter is active. */
 .tp-searchbar {
   display: flex;
@@ -345,6 +376,11 @@ body.taskpaper-no-strike .tp-done {
   opacity: 1;
 }
 
+/* Leaf items (no children) reveal their drag handle only on hover. */
+.tp-handle-leaf::before {
+  opacity: 0;
+}
+
 .tp-handle:hover::before {
   background: color-mix(in srgb, var(--interactive-accent) 60%, transparent);
 }
@@ -486,11 +522,6 @@ body.taskpaper-no-strike .tp-done {
   color: var(--text-on-accent);
 }
 
-.taskpaper-sidebar .tp-sb-item.is-focused .tp-sb-count {
-  background: var(--text-on-accent);
-  color: var(--interactive-accent);
-}
-
 /* Inner spans carry their own colors — override them on the accent background. */
 .taskpaper-sidebar .tp-sb-item.is-focused .tp-sb-tag-name,
 .taskpaper-sidebar .tp-sb-item.is-focused .tp-sb-tag-count,
@@ -518,6 +549,25 @@ body.taskpaper-no-strike .tp-done {
 .taskpaper-sidebar .tp-sb-tag-count {
   color: var(--tp-tertiary);
   font-variant-numeric: tabular-nums;
+}
+
+/* Fold chevrons on rows with children (projects with subprojects, tags with
+ * values); state persists via settings. */
+.taskpaper-sidebar .tp-sb-chevron {
+  display: inline-flex;
+  width: 16px;
+  min-width: 16px;
+  color: var(--tp-tertiary);
+  cursor: pointer;
+}
+
+.taskpaper-sidebar .tp-sb-chevron svg {
+  width: 13px;
+  height: 13px;
+}
+
+.taskpaper-sidebar .tp-sb-chevron:hover {
+  color: var(--text-normal);
 }
 
 /* Tag value child rows (original sidebar lists each value under its tag). */
@@ -550,16 +600,6 @@ body.taskpaper-no-strike .tp-done {
   padding: 0 4px;
   font-size: var(--font-ui-smaller);
   line-height: 1.4;
-}
-
-.taskpaper-sidebar .tp-sb-count {
-  color: var(--text-on-accent);
-  background: var(--interactive-accent);
-  border-radius: 999px;
-  padding: 0 6px;
-  font-size: var(--font-ui-smaller);
-  min-width: 18px;
-  text-align: center;
 }
 
 /* ---- sidebar drag & drop ---- */
@@ -685,6 +725,21 @@ body.taskpaper-no-strike .tp-done {
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s);
   overflow: hidden;
+}
+
+/* Week-number column (W601 …) prepends an auto-sized first column. */
+.taskpaper-calendar .tp-cal-grid-weeks {
+  grid-template-columns: auto repeat(7, minmax(0, 1fr));
+}
+
+.taskpaper-calendar .tp-cal-weeknum,
+.taskpaper-calendar .tp-cal-weeknum-head {
+  background: var(--background-secondary);
+  color: color-mix(in srgb, var(--text-normal) 52%, transparent);
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+  padding: 4px 6px;
+  text-align: center;
 }
 
 .taskpaper-calendar .tp-cal-weekday {

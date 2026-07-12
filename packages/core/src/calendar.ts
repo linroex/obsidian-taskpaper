@@ -182,3 +182,21 @@ export function calendarModel(
 
   return { month: monthAnchor, weeks, overdue, agenda };
 }
+
+
+/**
+ * ISO-8601 week of a YYYY-MM-DD date (Monday-based, week 1 contains Jan 4),
+ * as the user's compact label: last digit of the ISO week-year + zero-padded
+ * week number — 2026 week 1 → "W601".
+ */
+export function isoWeekLabel(date: string): string {
+  const [y, m, d] = date.split('-').map(Number);
+  const day = new Date(y, m - 1, d);
+  // Shift to the Thursday of this week (ISO weeks belong to the year of
+  // their Thursday), then count weeks from that year's Jan 1.
+  const thursday = new Date(y, m - 1, d - ((day.getDay() + 6) % 7) + 3);
+  const weekYear = thursday.getFullYear();
+  const jan1 = new Date(weekYear, 0, 1);
+  const week = 1 + Math.round(((thursday.getTime() - jan1.getTime()) / 86400000 - 3 + ((jan1.getDay() + 6) % 7)) / 7);
+  return `W${weekYear % 10}${String(week).padStart(2, '0')}`;
+}

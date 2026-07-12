@@ -1,4 +1,4 @@
-import { ItemView, Menu, WorkspaceLeaf } from 'obsidian';
+import { ItemView, Menu, setIcon, WorkspaceLeaf } from 'obsidian';
 import { EditorSelection } from '@codemirror/state';
 import {
   focusVisibleLines,
@@ -11,6 +11,7 @@ import {
   SavedSearch,
   savedSearches,
   tagNamesToValues,
+  tagValueCounts,
 } from '@taskpaper/core';
 import { outlineOf } from './editor/outline';
 import { filterSpecField, setFilterEffect } from './editor/filter';
@@ -218,7 +219,29 @@ export class TaskPaperSidebarView extends ItemView {
     if (projects.length === 0) {
       projSection.createDiv({ cls: 'tp-sb-empty', text: '（無專案）' });
     }
+    // Ancestor-path keys drive the persisted collapse state; children of a
+    // collapsed project are skipped entirely.
+    const pathStack: string[] = [];
+    const hasChildProjects = (p: (typeof projects)[number]): boolean =>
+      projects.some((q) => q !== p && q.line > p.line && q.line <= p.subtreeEnd);
     for (const p of projects) {
+      while (pathStack.length > p.level) {
+        pathStack.pop();
+      }
+      const name = cleanProjectName(p.displayText);
+      pathStack[p.level] = name;
+      const path = pathStack.slice(0, p.level + 1).join('/');
+      const collapsedAncestor = (() => {
+        for (let l = 0; l < p.level; l++) {
+          if (this.isCollapsed(`project:${pathStack.slice(0, l + 1).join('/')}`)) {
+            return true;
+          }
+        }
+        return false;
+      })();
+      if (collapsedAncestor) {
+        continue;
+      }
       const el = projSection.createDiv({
         cls: 'tp-sb-item tp-sb-project',
         // data-line lets editor handle drags hit-test their drop target;
@@ -226,7 +249,6 @@ export class TaskPaperSidebarView extends ItemView {
         attr: { 'data-line': p.line, draggable: 'true' },
       });
       el.style.paddingLeft = `${8 + p.level * 14}px`;
-      const name = cleanProjectName(p.displayText);
       const selItem: SidebarSelectionItem = { kind: 'project', line: p.line, name };
       const hoistItem: SidebarSelectionItem = { kind: 'hoist', line: p.line, name };
       if (isSelected(selection, selItem) || view.focusedLine === p.line) {
@@ -238,7 +260,7 @@ export class TaskPaperSidebarView extends ItemView {
       el.createSpan({ text: p.displayText || '(未命名)' });
       const remaining = stats.get(p)?.remaining ?? 0;
       if (remaining > 0) {
-        el.createSpan({ cls: 'tp-sb-count', text: String(remaining) });
+        el.createSpan({ cls: 'tp-sb-tag-count', text: String(remaining) });
       }
       // Original: double-click hoists. Our single click already toggles focus,
       // so hoist rides on Alt/Option+click (and the context menu below).
@@ -251,6 +273,9 @@ export class TaskPaperSidebarView extends ItemView {
       };
       el.addEventListener('contextmenu', (e) => this.showProjectMenu(e, view, hoistItem));
       this.registerProjectDrag(el, view, p.line);
+      if (hasChildProjects(p)) {
+        this.addChevron(el, `project:${path}`);
+      }
     }
 
     // Tags section.
@@ -271,6 +296,7 @@ export class TaskPaperSidebarView extends ItemView {
       tagSection.createDiv({ cls: 'tp-sb-empty', text: '（無標籤）' });
     }
     const namesToValues = tagNamesToValues(outline);
+    const valueCounts = tagValueCounts(outline);
     for (const [name, count] of sorted) {
       const el = tagSection.createDiv({ cls: 'tp-sb-item tp-sb-tag' });
       const tagItem: SidebarSelectionItem = { kind: 'tag', query: `@${name}` };
@@ -280,9 +306,16 @@ export class TaskPaperSidebarView extends ItemView {
       el.createSpan({ cls: 'tp-sb-tag-name', text: `@${name}` });
       el.createSpan({ cls: 'tp-sb-tag-count', text: String(count) });
       el.onclick = (e) => select(tagItem, e);
+      const values = namesToValues.get(name) ?? [];
+      if (values.length > 0) {
+        this.addChevron(el, `tag:${name}`);
+      }
+      if (this.isCollapsed(`tag:${name}`)) {
+        continue;
+      }
       // Each distinct value is a child row (original sidebar); clicking it
       // filters with `@tag contains[l] "value"` — exactly the original query.
-      for (const value of namesToValues.get(name) ?? []) {
+      for (const value of values) {
         const valueItem: SidebarSelectionItem = {
           kind: 'tag',
           query: `@${name} contains[l] ${quoteQueryValue(value)}`,
@@ -292,9 +325,41 @@ export class TaskPaperSidebarView extends ItemView {
           vel.addClass('is-focused');
         }
         vel.createSpan({ text: value });
+        vel.createSpan({
+          cls: 'tp-sb-tag-count',
+          text: String(valueCounts.get(name)?.get(value) ?? 0),
+        });
         vel.onclick = (e) => select(valueItem, e);
       }
     }
+  }
+
+  /** Persisted collapse state for sidebar rows ("project:<path>" / "tag:<name>"). */
+  private isCollapsed(key: string): boolean {
+    return (this.plugin.settings.sidebarCollapsed ?? []).includes(key);
+  }
+
+  private toggleCollapsed(key: string): void {
+    const list = (this.plugin.settings.sidebarCollapsed ??= []);
+    const idx = list.indexOf(key);
+    if (idx >= 0) {
+      list.splice(idx, 1);
+    } else {
+      list.push(key);
+    }
+    void this.plugin.saveSettings();
+    this.plugin.refreshSidebar();
+  }
+
+  /** A chevron that folds/unfolds a row's children (persisted). */
+  private addChevron(row: HTMLElement, key: string): void {
+    const chevron = row.createSpan({ cls: 'tp-sb-chevron' });
+    setIcon(chevron, this.isCollapsed(key) ? 'chevron-right' : 'chevron-down');
+    row.prepend(chevron);
+    chevron.onclick = (e) => {
+      e.stopPropagation();
+      this.toggleCollapsed(key);
+    };
   }
 
   /** Dispatch the filter the current selection composes to. */

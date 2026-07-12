@@ -362,7 +362,7 @@ check('signature changes when file changes', sidebarSignature('a.taskpaper', 100
   const set = toggledTagFilter(null, 'waiting', true, 'bob');
   check(
     'value click sets a tag+value query (bare word unquoted)',
-    set !== null && set.mode === 'query' && set.query === '@waiting = bob',
+    set !== null && set.mode === 'query' && set.query === '@waiting contains[l] "bob"',
   );
   check(
     'clicking the same value again clears the filter',
@@ -371,7 +371,7 @@ check('signature changes when file changes', sidebarSignature('a.taskpaper', 100
   const other = toggledTagFilter(set, 'waiting', true, 'ann');
   check(
     'clicking a different value replaces the filter',
-    other !== null && other.mode === 'query' && other.query === '@waiting = ann',
+    other !== null && other.mode === 'query' && other.query === '@waiting contains[l] "ann"',
   );
   check(
     'name click while a value filter is active replaces it',
@@ -379,15 +379,15 @@ check('signature changes when file changes', sidebarSignature('a.taskpaper', 100
   );
   check(
     'value with spaces is quoted',
-    toggledTagFilter(null, 'note', true, 'the value')?.query === '@note = "the value"',
+    toggledTagFilter(null, 'note', true, 'the value')?.query === '@note contains[l] "the value"',
   );
   check(
     'value with non-word chars is quoted',
-    toggledTagFilter(null, 'due', true, '2026-01-01')?.query === '@due = "2026-01-01"',
+    toggledTagFilter(null, 'due', true, '2026-01-01')?.query === '@due contains[l] "2026-01-01"',
   );
   check(
     'quotes and backslashes in the value are escaped',
-    toggledTagFilter(null, 'x', true, 'a "b" \\c')?.query === '@x = "a \\"b\\" \\\\c"',
+    toggledTagFilter(null, 'x', true, 'a "b" \\c')?.query === '@x contains[l] "a \\"b\\" \\\\c"',
   );
 }
 

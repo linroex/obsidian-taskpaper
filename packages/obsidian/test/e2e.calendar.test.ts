@@ -74,9 +74,13 @@ function textOf(occ: HTMLElement): string {
   const fx = mountCalendar(DOC);
   check('month label shows the anchor month', fx.root.textContent!.includes('2026年7月'));
   check(
-    'weekday header starts Monday (一)',
-    fx.root.querySelector('.tp-cal-weekday')?.textContent === '一',
+    'weekday header starts Monday (一) after the week-number column',
+    fx.root.querySelector('.tp-cal-weekday:not(.tp-cal-weeknum-head)')?.textContent === '一',
   );
+  // ISO week labels: last year digit + zero-padded week (2026-07-12 週 = W628 起算列).
+  const weekLabels = Array.from(fx.root.querySelectorAll('.tp-cal-weeknum')).map((el) => el.textContent);
+  check('every week row carries a W-label', weekLabels.length === 5 && weekLabels.every((w) => /^W6\d{2}$/.test(w ?? '')), weekLabels.join(','));
+  check('first July 2026 row is ISO week 27', weekLabels[0] === 'W627', String(weekLabels[0]));
   check('grid has 5 week rows of cells', fx.root.querySelectorAll('.tp-cal-day').length === 35);
 
   const due = fx.cell('2026-07-15')!;

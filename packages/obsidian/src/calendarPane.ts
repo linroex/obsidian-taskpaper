@@ -1,6 +1,6 @@
 import { Notice, setIcon } from 'obsidian';
 import type { EditorState } from '@codemirror/state';
-import { calendarModel, CalendarModel, CalendarOccurrence, removeAllTags } from '@taskpaper/core';
+import { calendarModel, CalendarModel, CalendarOccurrence, isoWeekLabel, removeAllTags } from '@taskpaper/core';
 import { outlineOf } from './editor/outline';
 
 /** Weekday glyph by Date#getDay() index. */
@@ -208,12 +208,15 @@ export class CalendarPane {
 
   private renderMonthGrid(container: HTMLElement, model: CalendarModel, todayStr: string): void {
     const weekStart = this.host.weekStart();
-    const grid = container.createDiv({ cls: 'tp-cal-grid' });
+    const grid = container.createDiv({ cls: 'tp-cal-grid tp-cal-grid-weeks' });
+    // Week-number column (W601 = ISO week 1 of 2026), then the weekday headers.
+    grid.createDiv({ cls: 'tp-cal-weekday tp-cal-weeknum-head', text: 'W' });
     for (let i = 0; i < 7; i++) {
       grid.createDiv({ cls: 'tp-cal-weekday', text: WEEKDAYS[(weekStart + i) % 7] });
     }
     const maxShown = 3;
     for (const week of model.weeks) {
+      grid.createDiv({ cls: 'tp-cal-weeknum', text: isoWeekLabel(week[0].date) });
       for (const day of week) {
         let cls = 'tp-cal-day';
         if (!day.inMonth) {

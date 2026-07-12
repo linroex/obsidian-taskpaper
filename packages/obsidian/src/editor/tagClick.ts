@@ -1,11 +1,7 @@
 import { Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
+import { quoteQueryValue } from '@taskpaper/core';
 import { FilterSpec, filterSpecField, setFilterEffect } from './filter';
-
-/** Render a tag value as a query literal: bare when a single word, quoted otherwise. */
-function queryValueLiteral(value: string): string {
-  return /^\w+$/.test(value) ? value : `"${value.replace(/(["\\])/g, '\\$1')}"`;
-}
 
 /**
  * Compute the filter that results from clicking a tag (TaskPaper 3 behavior):
@@ -18,8 +14,12 @@ export function toggledTagFilter(
   hide: boolean,
   value?: string,
 ): FilterSpec | null {
+  // Same canonical query the sidebar's value rows use (original app form) —
+  // the sidebar highlights its matching row by comparing query strings.
   const query =
-    value === undefined ? `@${tagName}` : `@${tagName} = ${queryValueLiteral(value)}`;
+    value === undefined
+      ? `@${tagName}`
+      : `@${tagName} contains[l] ${quoteQueryValue(value)}`;
   if (current && current.mode === 'query' && current.query === query) {
     return null;
   }

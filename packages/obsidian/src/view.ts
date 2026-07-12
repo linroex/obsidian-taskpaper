@@ -24,6 +24,8 @@ export class TaskPaperView extends TextFileView {
   private searchInput!: HTMLInputElement;
   /** editor ⇄ calendar, toggled in place within the same tab. */
   viewMode: 'editor' | 'calendar' = 'editor';
+  /** Editor share of the tab while in calendar mode (0 = calendar only). */
+  private splitRatio = 0;
   private calendarEl!: HTMLElement;
   calendarPane!: CalendarPane;
   private calendarAction: HTMLElement | null = null;
@@ -69,6 +71,27 @@ export class TaskPaperView extends TextFileView {
 
   /** The embedded calendar container (hidden while in editor mode). */
   private buildCalendar(): void {
+    // Divider between editor and calendar: drag to size the split (up to a
+    // full-tab calendar at 0); double-click resets to calendar-only.
+    const divider = this.contentEl.createDiv({ cls: 'tp-cal-divider' });
+    divider.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      divider.addClass('is-dragging');
+      const total = this.contentEl.getBoundingClientRect();
+      const onMove = (ev: MouseEvent) => {
+        const ratio = Math.min(0.85, Math.max(0, (ev.clientY - total.top) / total.height));
+        this.setSplitRatio(ratio < 0.05 ? 0 : ratio);
+      };
+      const onUp = () => {
+        divider.removeClass('is-dragging');
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    });
+    divider.addEventListener('dblclick', () => this.setSplitRatio(0));
+
     this.calendarEl = this.contentEl.createDiv({
       cls: 'taskpaper-calendar tp-cal-embedded',
       attr: { tabindex: '-1' },
@@ -98,6 +121,9 @@ export class TaskPaperView extends TextFileView {
     }
     this.viewMode = mode;
     this.contentEl.toggleClass('is-calendar-mode', mode === 'calendar');
+    if (mode === 'calendar') {
+      this.setSplitRatio(this.splitRatio); // restore the last split size
+    }
     this.calendarPane.setActive(mode === 'calendar');
     if (mode === 'calendar') {
       // The hidden CodeMirror must not keep keyboard focus — typing would
@@ -115,6 +141,13 @@ export class TaskPaperView extends TextFileView {
     if (mode === 'editor') {
       this.editor.focus();
     }
+  }
+
+  /** Size the editor/calendar split (0 = full-tab calendar). */
+  private setSplitRatio(ratio: number): void {
+    this.splitRatio = ratio;
+    this.contentEl.toggleClass('has-split', ratio > 0);
+    this.contentEl.style.setProperty('--tp-split', String(ratio));
   }
 
   /** Re-render the embedded calendar when it is the active mode. */

@@ -97,6 +97,32 @@ export function tagNamesToValues(outline: Outline): Map<string, string[]> {
   return out;
 }
 
+/**
+ * How many items carry each distinct value of each tag (comma-split, like
+ * tagNamesToValues) — the sidebar's value rows show these counts.
+ */
+export function tagValueCounts(outline: Outline): Map<string, Map<string, number>> {
+  const out = new Map<string, Map<string, number>>();
+  for (const item of outline.items) {
+    for (const [name, value] of item.tags) {
+      let counts = out.get(name);
+      if (!counts) {
+        counts = new Map();
+        out.set(name, counts);
+      }
+      const seen = new Set<string>();
+      for (const part of (value ?? '').split(',')) {
+        const v = part.trim();
+        if (v && !seen.has(v)) {
+          seen.add(v);
+          counts.set(v, (counts.get(v) ?? 0) + 1);
+        }
+      }
+    }
+  }
+  return out;
+}
+
 export interface SavedSearch {
   name: string;
   query: string;

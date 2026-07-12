@@ -8,7 +8,15 @@ import {
   WidgetType,
 } from '@codemirror/view';
 import { foldEffect, unfoldEffect } from '@codemirror/language';
-import { buildOutline, focusVisibleLines, moveBranchToProject, Outline } from '@taskpaper/core';
+import {
+  buildOutline,
+  focusVisibleLines,
+  itemAtLine,
+  moveBranchAfter,
+  moveBranchBefore,
+  moveBranchToProject,
+  Outline,
+} from '@taskpaper/core';
 import { setFilterEffect } from './filter';
 import { foldedRangeAtLine, subtreeFoldRange } from './folding';
 import { outlineOf, visibleItems } from './outline';
@@ -30,6 +38,42 @@ export interface HandleDragPlan {
   lines: string[];
   /** Where the dragged item's first line lands (0-based). */
   cursorLine: number;
+}
+
+/**
+ * Compute the result of dragging the handle on `itemLine` to drop before or
+ * after the item at `targetLine` — ANYWHERE in the document, re-indented to
+ * the drop target's level (cross-project moves included). Returns null when
+ * the drop is a no-op or lands inside the dragged branch. (Pure; testable.)
+ */
+export function planFreeDrag(
+  lines: string[],
+  itemLine: number,
+  targetLine: number,
+  dropAfter: boolean,
+  tabSize: number,
+): HandleDragPlan | null {
+  const outline = buildOutline(lines, tabSize);
+  const item = outline.items.find((i) => i.line === itemLine);
+  const target =
+    outline.items.find((i) => i.line === targetLine) ?? itemAtLine(outline, targetLine);
+  if (!item || !target) {
+    return null;
+  }
+  if (target.line >= item.line && target.line <= item.subtreeEnd) {
+    return null; // inside the dragged branch
+  }
+  const edit = dropAfter
+    ? moveBranchAfter(lines, item.line, target.line, tabSize)
+    : moveBranchBefore(lines, item.line, target.line, tabSize);
+  if (!edit) {
+    return null;
+  }
+  return {
+    indicatorLine: dropAfter ? target.subtreeEnd + 1 : target.line,
+    lines: edit.lines,
+    cursorLine: edit.cursorLine,
+  };
 }
 
 /**
@@ -90,15 +134,18 @@ export function planHandleDrag(
 // ---------------------------------------------------------------------------
 
 class HandleWidget extends WidgetType {
-  constructor(readonly line: number) {
+  constructor(
+    readonly line: number,
+    readonly leaf: boolean,
+  ) {
     super();
   }
   eq(other: HandleWidget): boolean {
-    return other.line === this.line;
+    return other.line === this.line && other.leaf === this.leaf;
   }
   toDOM(): HTMLElement {
     const span = document.createElement('span');
-    span.className = 'tp-handle';
+    span.className = this.leaf ? 'tp-handle tp-handle-leaf' : 'tp-handle';
     span.setAttribute('data-line', String(this.line));
     span.setAttribute('aria-hidden', 'true');
     span.title = '點一下摺疊/展開，拖曳移動整個分支';
@@ -115,17 +162,15 @@ function buildHandleDecorations(view: EditorView): DecorationSet {
   // Viewport-only, like the highlight plugin — full-doc rebuilds are too
   // costly per keystroke on huge files.
   const parents = new Set(handleLines(outline));
+  // EVERY item gets a drag handle; leaves reveal theirs on hover only.
   for (const item of visibleItems(view, outline)) {
-    if (!parents.has(item.line)) {
-      continue;
-    }
     const lineNo = item.line;
     const line = view.state.doc.line(lineNo + 1);
     const indent = /^[\t ]*/.exec(line.text)?.[0].length ?? 0;
     builder.add(
       line.from + indent,
       line.from + indent,
-      Decoration.widget({ widget: new HandleWidget(lineNo), side: -1 }),
+      Decoration.widget({ widget: new HandleWidget(lineNo, !parents.has(lineNo)), side: -1 }),
     );
   }
   return builder.finish();
@@ -226,7 +271,16 @@ class HandleDrag {
     }
     const pos = this.view.posAtCoords({ x: e.clientX, y: e.clientY }, false);
     const hoverLine = this.view.state.doc.lineAt(pos).number - 1;
-    this.plan = planHandleDrag(docLines(this.view), this.itemLine, hoverLine, 4);
+    // Upper half of the hovered line drops BEFORE it, lower half AFTER —
+    // anywhere in the document (cross-project; re-indents to the target).
+    let dropAfter = true;
+    try {
+      const block = this.view.lineBlockAt(pos);
+      dropAfter = block.height > 0 ? e.clientY > block.top + block.height / 2 : true;
+    } catch {
+      // headless layout — keep the default
+    }
+    this.plan = planFreeDrag(docLines(this.view), this.itemLine, hoverLine, dropAfter, 4);
     this.planDoc = this.view.state.doc;
     this.drawIndicator();
   }

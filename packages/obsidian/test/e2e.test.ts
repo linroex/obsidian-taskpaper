@@ -121,7 +121,7 @@ const DOC = [
   check('the (bob) value mark renders', value !== null);
 
   clickEl(value!);
-  check('value click filters by tag + value', activeQuery(view) === '@waiting = bob', String(activeQuery(view)));
+  check('value click filters by tag + value', activeQuery(view) === '@waiting contains[l] "bob"', String(activeQuery(view)));
   check(
     'only the matching branch stays visible',
     setEq(hiddenLineNumbers(view), new Set([2, 4, 5, 6])),
@@ -140,7 +140,14 @@ const DOC = [
 {
   const { view, cleanup } = mountEditor(DOC);
   const handles = findMark(view, 'tp-handle');
-  check('handles render on items with children', handles.length === 2, String(handles.length));
+  // EVERY item now carries a drag handle (leaves reveal theirs on hover);
+  // parents keep the always-visible dot, leaves get tp-handle-leaf.
+  check('every item renders a handle', handles.length === 6, String(handles.length));
+  check(
+    'leaf handles carry the hover-only class, parents do not',
+    handles[0].classList.contains('tp-handle-leaf') === false &&
+      handles[1].classList.contains('tp-handle-leaf') === true,
+  );
   check('handle knows its line', handles[0].getAttribute('data-line') === '0');
 
   clickEl(handles[0]); // Inbox's handle

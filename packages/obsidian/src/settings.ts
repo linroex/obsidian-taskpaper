@@ -13,6 +13,8 @@ export interface TaskPaperSettings {
   filterHidesInsteadOfDims: boolean;
   /** First day of the calendar week: 1 = Monday, 0 = Sunday. */
   calendarWeekStart: number;
+  /** Collapsed sidebar rows ("project:<path>" / "tag:<name>"), persisted. */
+  sidebarCollapsed: string[];
   /** Saved searches shown in the sidebar for every document (TaskPaper's searches.taskpaper). */
   globalSearches: GlobalSearch[];
   /** Tags always shown in the sidebar even at count 0 — space/comma separated, '@' optional. Empty = show all found tags. */
@@ -29,6 +31,7 @@ export const DEFAULT_SETTINGS: TaskPaperSettings = {
   strikeDoneItems: true,
   filterHidesInsteadOfDims: true,
   calendarWeekStart: 1,
+  sidebarCollapsed: [],
   globalSearches: [
     { name: 'Today', query: '@today' },
     { name: 'Not Done', query: 'not @done' },
