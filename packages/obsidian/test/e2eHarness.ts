@@ -31,6 +31,8 @@ export interface RecordingHost extends EditorHost {
   openedLinks: { href: string; kind: LinkKind }[];
   /** How many times saveNow() ran (Mod-S / blur). */
   saves: number;
+  /** Every notify() message (shown as a Notice in production). */
+  notices: string[];
 }
 
 export interface MountedEditor {
@@ -51,8 +53,12 @@ export function mountEditor(
     docChanges: [],
     openedLinks: [],
     saves: 0,
+    notices: [],
     hide: () => true,
     doneStamp: () => '2026-01-02',
+    notify(message) {
+      this.notices.push(message);
+    },
     setFocusedLine(line) {
       this.focusLines.push(line);
     },

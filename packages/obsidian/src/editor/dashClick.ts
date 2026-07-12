@@ -1,10 +1,12 @@
 import { Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { toggleDoneLine } from '@taskpaper/core';
+import { toggleDoneAtLines } from './toggleDone';
 
 export interface DashClickOptions {
   /** The @done stamp to apply (already formatted per settings). */
   stamp(): string;
+  /** Show a user-facing warning (a Notice in production). */
+  notify(message: string): void;
 }
 
 /**
@@ -21,12 +23,10 @@ export function dashClickExtension(opts: DashClickOptions): Extension {
       }
       const pos = view.posAtDOM(target);
       const line = view.state.doc.lineAt(pos);
-      const next = toggleDoneLine(line.text, opts.stamp());
-      if (next === line.text) {
+      if (!toggleDoneAtLines(view, [line.number - 1], opts.stamp(), opts.notify)) {
         return false;
       }
       event.preventDefault();
-      view.dispatch({ changes: { from: line.from, to: line.to, insert: next } });
       return true;
     },
   });

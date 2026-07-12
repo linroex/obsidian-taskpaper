@@ -16,6 +16,7 @@
 import { clickEl, docText, hiddenLineNumbers, mountEditor } from './e2eHarness';
 import { foldedRanges } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
+import { todayStamp } from '@taskpaper/core';
 import { App, Notice } from 'obsidian';
 import { TaskPaperCommands } from '../src/commands';
 import { DEFAULT_SETTINGS } from '../src/settings';
@@ -313,6 +314,88 @@ async function main(): Promise<void> {
     const before = docText(view);
     commands.outdentOnly(fakeView);
     check('outdenting at the margin is a no-op', docText(view) === before);
+    cleanup();
+  }
+
+  // --- Toggle done: the command spawns @repeat successors in one transaction ---
+  {
+    const stamp = todayStamp(false); // DEFAULT_SETTINGS.doneIncludesTime is false
+    const doc = [
+      'Home:',
+      '\t- water plants @due(2026-07-01) @repeat(1w)',
+      '\t\t- refill the can',
+      '\t- no anchor @repeat(1w)',
+    ].join('\n');
+    const { view, host, cleanup } = mountEditor(doc);
+    const { commands, fakeView } = commandsFor(view);
+    view.dispatch({ selection: { anchor: lineFrom(view, 2) } });
+
+    const changesBefore = host.docChanges.length;
+    commands.toggleDone(fakeView);
+    check(
+      'toggle-done command stamps @done through the shared plan',
+      view.state.doc.line(2).text === `\t- water plants @due(2026-07-01) @repeat(1w) @done(${stamp})`,
+      view.state.doc.line(2).text,
+    );
+    check(
+      'toggle-done command spawns the successor after the subtree',
+      view.state.doc.line(4).text === '\t- water plants @due(2026-07-08) @repeat(1w)',
+      view.state.doc.line(4).text,
+    );
+    check(
+      'the command path applies done + spawn as ONE transaction',
+      host.docChanges.length === changesBefore + 1,
+      String(host.docChanges.length - changesBefore),
+    );
+
+    // No date anchor: the task completes, nothing spawns, a Notice warns.
+    view.dispatch({ selection: { anchor: lineFrom(view, 5) } });
+    commands.toggleDone(fakeView);
+    check(
+      'toggle-done on a no-anchor @repeat task still completes it',
+      view.state.doc.line(5).text === `\t- no anchor @repeat(1w) @done(${stamp})`,
+      view.state.doc.line(5).text,
+    );
+    check('no successor spawns without a date anchor', view.state.doc.lines === 5);
+    check(
+      'the no-anchor warning shows as a Notice',
+      Notice.messages.includes('@repeat 需要 @due 或 @start 日期才能產生下一次'),
+    );
+    cleanup();
+  }
+
+  // --- Toggle done: multi-select plans every line against one snapshot ---
+  {
+    const stamp = todayStamp(false);
+    const doc = [
+      '- a @due(2026-07-01) @repeat(1w)',
+      '- b @due(2026-07-02) @repeat(1d)',
+      '- c plain',
+    ].join('\n');
+    const { view, host, cleanup } = mountEditor(doc);
+    const { commands, fakeView } = commandsFor(view);
+    view.dispatch({ selection: { anchor: 0, head: lineTo(view, 3) } });
+
+    const changesBefore = host.docChanges.length;
+    commands.toggleDone(fakeView);
+    check(
+      'multi-select toggle completes every selected line',
+      view.state.doc.line(1).text === `- a @due(2026-07-01) @repeat(1w) @done(${stamp})` &&
+        view.state.doc.line(3).text === `- b @due(2026-07-02) @repeat(1d) @done(${stamp})` &&
+        view.state.doc.line(5).text === `- c plain @done(${stamp})`,
+      docText(view),
+    );
+    check(
+      'multi-select toggle spawns each successor in place',
+      view.state.doc.line(2).text === '- a @due(2026-07-08) @repeat(1w)' &&
+        view.state.doc.line(4).text === '- b @due(2026-07-03) @repeat(1d)',
+      docText(view),
+    );
+    check(
+      'the whole multi-select toggle is ONE transaction',
+      host.docChanges.length === changesBefore + 1 && view.state.doc.lines === 5,
+      String(host.docChanges.length - changesBefore),
+    );
     cleanup();
   }
 
