@@ -1,6 +1,6 @@
 import { ItemView, Notice, setIcon, WorkspaceLeaf } from 'obsidian';
 import { EditorSelection } from '@codemirror/state';
-import { calendarModel, CalendarModel, CalendarOccurrence } from '@taskpaper/core';
+import { calendarModel, CalendarModel, CalendarOccurrence, removeAllTags } from '@taskpaper/core';
 import { outlineOf } from './editor/outline';
 import type TaskPaperPlugin from './main';
 import type { TaskPaperView } from './view';
@@ -63,13 +63,38 @@ export class TaskPaperCalendarView extends ItemView {
     return 'calendar-days';
   }
 
+  private midnightTimer: number | null = null;
+
   async onOpen(): Promise<void> {
     this.render(true);
     this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.render()));
+    this.scheduleMidnightRefresh();
   }
 
   async onClose(): Promise<void> {
+    if (this.midnightTimer !== null) {
+      window.clearTimeout(this.midnightTimer);
+      this.midnightTimer = null;
+    }
     this.contentEl.empty();
+  }
+
+  /** Re-render right after local midnight (今天 highlight, @today items and
+   *  overdue status all roll over), then reschedule for the next day. */
+  private scheduleMidnightRefresh(): void {
+    if (this.midnightTimer !== null) {
+      window.clearTimeout(this.midnightTimer);
+    }
+    const now = this.now();
+    const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    this.midnightTimer = window.setTimeout(
+      () => {
+        this.midnightTimer = null;
+        this.render(true);
+        this.scheduleMidnightRefresh();
+      },
+      nextMidnight.getTime() - now.getTime() + 1000,
+    );
   }
 
   render(force = false): void {
@@ -283,12 +308,14 @@ export class TaskPaperCalendarView extends ItemView {
   /** Jump to the occurrence's source line — unless the document has drifted. */
   private openOccurrence(view: TaskPaperView, occ: CalendarOccurrence): void {
     const doc = view.editor.state.doc;
-    // Staleness guard: the line must still exist and still contain the
-    // occurrence's (tag-stripped) text — edits shift lines, and a stale line
-    // must never be focused.
+    // Staleness guard: rebuild the line's tag-stripped fingerprint and require
+    // EXACT equality — a substring check could accept a different task whose
+    // title merely contains the old one, and empty titles bypassed it.
+    const fingerprint = (line: string): string =>
+      removeAllTags(line).replace(/^[\t ]*(?:-\s*)?/, '').trim();
     const stale =
       occ.line + 1 > doc.lines ||
-      (occ.text !== '' && !doc.line(occ.line + 1).text.includes(occ.text));
+      fingerprint(doc.line(occ.line + 1).text) !== occ.text.trim();
     if (stale) {
       new Notice('文件已變更，找不到該項目——行事曆已重新整理。');
       this.render(true);

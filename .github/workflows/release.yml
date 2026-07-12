@@ -39,14 +39,25 @@ jobs:
             exit 1
           fi
 
+      - name: Package plugin folder
+        run: |
+          mkdir -p /tmp/pkg/taskpaper
+          cp packages/obsidian/main.js packages/obsidian/manifest.json packages/obsidian/styles.css /tmp/pkg/taskpaper/
+          (cd /tmp/pkg && zip -r "taskpaper-${GITHUB_REF_NAME}.zip" taskpaper)
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cat > /tmp/notes.md <<'NOTES'
-          TaskPaper 純文字任務管理 for Obsidian — 專案／任務／筆記／@標籤、完整 TaskPaper 查詢語言、側欄（專案・標籤・儲存搜尋）、搜尋列、行事曆檢視、封存、拖曳整理。
+          TaskPaper 純文字任務管理 for Obsidian — 專案／任務／筆記／@標籤、完整 TaskPaper 查詢語言、側欄（專案・標籤・儲存搜尋）、搜尋列、行事曆檢視（月曆格＋列表）、封存、拖曳整理。
 
           ## 安裝方式
+
+          **懶人包（推薦）**
+          1. 下載下方的 `taskpaper-<版本>.zip`，解壓縮
+          2. 把解出來的 `taskpaper/` 資料夾放進 vault 的 `.obsidian/plugins/`
+          3. 重新載入 Obsidian，在「設定 → 社群外掛」啟用 **TaskPaper**
 
           **手動安裝**
           1. 下載下方的 `main.js`、`manifest.json`、`styles.css`
@@ -58,6 +69,7 @@ jobs:
           2. 「Add beta plugin」填入 `linroex/obsidian-taskpaper`
           NOTES
           gh release create "$GITHUB_REF_NAME" \
+            "/tmp/pkg/taskpaper-${GITHUB_REF_NAME}.zip" \
             packages/obsidian/main.js \
             packages/obsidian/manifest.json \
             packages/obsidian/styles.css \
