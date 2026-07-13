@@ -19,7 +19,9 @@
  */
 import { docText, hiddenLineNumbers, mountEditor, press, RecordingHost } from './e2eHarness';
 import { EditorSelection } from '@codemirror/state';
+import type { EditorView } from '@codemirror/view';
 import { Menu, TFile, WorkspaceLeaf } from 'obsidian';
+import { filterDecoField, filterSpecField } from '../src/editor/filter';
 import { DRAG_ASSIGN_ABORT_NOTICE } from '../src/editor/handles';
 import { TaskPaperSidebarView } from '../src/sidebar';
 import type TaskPaperPlugin from '../src/main';
@@ -40,6 +42,17 @@ function setEq(a: Set<number>, b: Set<number>): boolean {
   return a.size === b.size && [...a].every((v) => b.has(v));
 }
 
+/** 1-based line numbers carrying the dim LINE decoration (hide:false filters). */
+function dimLineNumbers(view: EditorView): Set<number> {
+  const dims = new Set<number>();
+  view.state.field(filterDecoField).between(0, view.state.doc.length, (from, to) => {
+    if (from === to) {
+      dims.add(view.state.doc.lineAt(from).number);
+    }
+  });
+  return dims;
+}
+
 // Home(1) / Errands(2) / -buy milk(3) / -pick up(4) / Work(5) / -gamma(6) /
 // -delta(7) / Inbox(8)   (1-based; 0-based lines are one less)
 const DOC = [
@@ -54,7 +67,11 @@ const DOC = [
 ].join('\n');
 
 /** Mount a real editor + the real sidebar view around a minimal fake plugin. */
-function mountSidebar(doc: string, hostOverrides: Partial<RecordingHost> = {}) {
+function mountSidebar(
+  doc: string,
+  hostOverrides: Partial<RecordingHost> = {},
+  settingsOverrides: Record<string, unknown> = {},
+) {
   const mounted = mountEditor(doc, hostOverrides);
   const leaf = new WorkspaceLeaf();
   const fakeView = {
@@ -70,6 +87,7 @@ function mountSidebar(doc: string, hostOverrides: Partial<RecordingHost> = {}) {
       includeTags: '',
       excludeTags: '',
       filterHidesInsteadOfDims: true,
+      ...settingsOverrides,
     },
     lastActiveView: fakeView,
     refreshSidebar: () => sidebar.render(true),
@@ -432,6 +450,39 @@ function mountTagFixture() {
   fx.cleanup();
 }
 
+// --- @done drop with MIXED done/undone roots toggles only the undone ---
+// (A plain toggle would UN-complete the already-done root; the drop filters
+// the drag roots down to the not-yet-done ones before the pipeline runs.)
+{
+  let hover: Element | null = null;
+  const MIX_DOC = ['Home:', '\t- open one', '\t- finished @done(2026-07-01)'].join('\n');
+  const fx = mountSidebar(MIX_DOC, { elementFromPoint: (_x, y) => (y >= 100 ? hover : null) });
+  const row = fx.sidebar.contentEl.querySelector<HTMLElement>('.tp-sb-tag[data-tag-name="done"]')!;
+  hover = row;
+  // Multi-select BOTH roots, then drag one of them onto the @done row.
+  const doc = fx.editor.state.doc;
+  fx.editor.dispatch({
+    selection: EditorSelection.create([
+      EditorSelection.cursor(doc.line(2).from),
+      EditorSelection.cursor(doc.line(3).from),
+    ]),
+  });
+  fx.editor.dom
+    .querySelector<HTMLElement>('.tp-handle[data-line="1"]')!
+    .dispatchEvent(mouse('mousedown', { clientY: 0 }));
+  window.dispatchEvent(mouse('mousemove', { clientX: 10, clientY: 150 }));
+  window.dispatchEvent(mouse('mouseup'));
+  const lines = docText(fx.editor).split('\n');
+  check('the undone root completes with the stamp', lines[1] === '\t- open one @done(2026-01-02)', lines[1]);
+  check(
+    'the already-done root keeps its original @done (never un-completed)',
+    lines[2] === '\t- finished @done(2026-07-01)',
+    lines[2],
+  );
+  check('a mixed drop shows no notice', fx.host.notices.length === 0, fx.host.notices.join('|'));
+  fx.cleanup();
+}
+
 // --- duplicate same-name tags collapse to one on drop ---
 {
   const fx = mountTagFixture();
@@ -482,6 +533,24 @@ function mountTagFixture() {
   fx.cleanup();
 }
 
+// --- a doc change mid-drag over a PROJECT row aborts SILENTLY ---
+// (Only tag-assign drags warn — project drops recompute from the fresh
+// document anyway, so their abort must not spam a notice.)
+{
+  const fx = mountTagFixture();
+  const projRow = fx.rows()[1]; // Work
+  fx.setHover(projRow);
+  fx.handle(3).dispatchEvent(mouse('mousedown', { clientY: 0 })); // beta
+  window.dispatchEvent(mouse('mousemove', { clientX: 10, clientY: 150 }));
+  check('project row highlighted before the edit', projRow.classList.contains('tp-sb-drop-into'));
+  fx.editor.dispatch({ changes: { from: 0, to: 0, insert: 'X' } }); // concurrent edit
+  check('a project-drop abort shows NO notice', fx.host.notices.length === 0, fx.host.notices.join('|'));
+  check('the abort clears the project highlight', !projRow.classList.contains('tp-sb-drop-into'));
+  window.dispatchEvent(mouse('mouseup'));
+  check('no move is committed after the silent abort', docText(fx.editor) === 'X' + TAG_DOC, docText(fx.editor));
+  fx.cleanup();
+}
+
 // --- Escape cancels an assign drag silently ---
 {
   const fx = mountTagFixture();
@@ -495,6 +564,120 @@ function mountTagFixture() {
   window.dispatchEvent(mouse('mouseup'));
   check('the cancelled assign changes nothing', docText(fx.editor) === TAG_DOC);
   check('a cancelled assign shows no notice', fx.host.notices.length === 0);
+  fx.cleanup();
+}
+
+// ---------------------------------------------------------------------------
+// Settings-driven behavior: dim mode, include/exclude tags
+// ---------------------------------------------------------------------------
+
+// --- filterHidesInsteadOfDims: false — sidebar filters DIM instead of hide ---
+{
+  const fx = mountSidebar(TAG_DOC, {}, { filterHidesInsteadOfDims: false });
+  fx.sidebar.contentEl
+    .querySelector<HTMLElement>('.tp-sb-tag[data-tag-name="flag"]')!
+    .dispatchEvent(mouse('click'));
+  const spec = fx.editor.state.field(filterSpecField);
+  check(
+    'the sidebar tag click carries hide:false',
+    spec !== null && spec.mode === 'query' && spec.hide === false,
+    JSON.stringify(spec),
+  );
+  // No block-replace (hide) decorations exist — dim mode only adds line marks.
+  let hideBlocks = 0;
+  fx.editor.state.field(filterDecoField).between(0, fx.editor.state.doc.length, (from, to) => {
+    if (to > from) {
+      hideBlocks++;
+    }
+  });
+  check('nothing is hidden in dim mode', hideBlocks === 0, String(hideBlocks));
+  // Only delta (@flag) and its ancestor Work stay undimmed.
+  check(
+    'every non-matching line is dimmed',
+    setEq(dimLineNumbers(fx.editor), new Set([1, 2, 3, 4, 6])),
+    [...dimLineNumbers(fx.editor)].join(','),
+  );
+  check(
+    'the tp-dim class reaches the rendered lines',
+    fx.editor.dom.querySelectorAll('.cm-line.tp-dim').length === 5,
+    String(fx.editor.dom.querySelectorAll('.cm-line.tp-dim').length),
+  );
+  fx.cleanup();
+}
+
+// --- Ctrl/Cmd multi-select composes union within kinds, intersect across ---
+{
+  const MULTI_DOC = ['Home:', '\t- h1 @a', 'Work:', '\t- w1 @a', '\t- w2 @b', '\t- w3'].join('\n');
+  const fx = mountSidebar(MULTI_DOC);
+  const tagRow = (name: string) =>
+    fx.sidebar.contentEl.querySelector<HTMLElement>(`.tp-sb-tag[data-tag-name="${name}"]`)!;
+  fx.rows()[1].dispatchEvent(mouse('click', { ctrlKey: true })); // Work (line 2)
+  tagRow('a').dispatchEvent(mouse('click', { ctrlKey: true }));
+  tagRow('b').dispatchEvent(mouse('click', { ctrlKey: true }));
+  const spec = fx.editor.state.field(filterSpecField);
+  check(
+    'project + two tags compose (project//*) intersect (tag union tag)',
+    spec !== null &&
+      spec.mode === 'query' &&
+      spec.query === '(((@id = 2 and project)//*)) intersect ((@a) union (@b))',
+    JSON.stringify(spec),
+  );
+  check(
+    'only Work descendants tagged @a or @b stay visible',
+    setEq(hiddenLineNumbers(fx.editor), new Set([1, 2, 6])),
+    [...hiddenLineNumbers(fx.editor)].join(','),
+  );
+  check('the selection holds all three rows', fx.view.sidebarSelection.length === 3, JSON.stringify(fx.view.sidebarSelection));
+  check(
+    'every selected row highlights after the re-render',
+    fx.rows()[1].classList.contains('is-focused') &&
+      tagRow('a').classList.contains('is-focused') &&
+      tagRow('b').classList.contains('is-focused'),
+  );
+
+  // Ctrl-clicking a selected row removes just that row from the composition.
+  tagRow('b').dispatchEvent(mouse('click', { ctrlKey: true }));
+  const spec2 = fx.editor.state.field(filterSpecField);
+  check(
+    'ctrl-click on a selected row narrows the composed query',
+    spec2 !== null &&
+      spec2.mode === 'query' &&
+      spec2.query === '(((@id = 2 and project)//*)) intersect ((@a))',
+    JSON.stringify(spec2),
+  );
+  check(
+    'the narrowed filter hides the @b task again',
+    setEq(hiddenLineNumbers(fx.editor), new Set([1, 2, 5, 6])),
+    [...hiddenLineNumbers(fx.editor)].join(','),
+  );
+  fx.cleanup();
+}
+
+// --- includeTags / excludeTags drive which tag rows render ---
+{
+  const doc = ['Home:', '\t- a @flag', '\t- s @search(not @done)'].join('\n');
+  const fx = mountSidebar(doc, {}, { includeTags: '@due', excludeTags: 'search' });
+  const names = () =>
+    Array.from(fx.sidebar.contentEl.querySelectorAll<HTMLElement>('.tp-sb-tag')).map((el) =>
+      el.getAttribute('data-tag-name'),
+    );
+  check('an included tag renders even when absent from the document', names().includes('due'), names().join(','));
+  const dueRow = fx.sidebar.contentEl.querySelector<HTMLElement>('.tp-sb-tag[data-tag-name="due"]')!;
+  check(
+    'the included-but-absent tag shows count 0',
+    dueRow.querySelector('.tp-sb-count')?.textContent === '0',
+    dueRow.querySelector('.tp-sb-count')?.textContent ?? '(none)',
+  );
+  check('the default-excluded @search tag never renders', !names().includes('search'), names().join(','));
+  check('found + included tags render sorted alphabetically', names().join(',') === 'due,flag', names().join(','));
+  fx.cleanup();
+}
+{
+  const fx = mountSidebar('- a @flag', {}, { includeTags: 'flag due', excludeTags: '@flag' });
+  const names = Array.from(
+    fx.sidebar.contentEl.querySelectorAll<HTMLElement>('.tp-sb-tag'),
+  ).map((el) => el.getAttribute('data-tag-name'));
+  check('excludeTags wins over includeTags', names.join(',') === 'due', names.join(','));
   fx.cleanup();
 }
 
