@@ -1,18 +1,10 @@
 import { Notice, setIcon } from 'obsidian';
-import type { EditorState } from '@codemirror/state';
-import {
-  addTag,
-  calendarModel,
-  CalendarModel,
-  CalendarOccurrence,
-  isoDate,
-  isoMonth,
-  isoWeekLabel,
-  removeTag,
-  setTagValue,
-  stripTags,
-} from '@taskpaper/core';
-import { outlineOf } from './editor/outline';
+import { CalendarOptions, isoDate, isoMonth, isoWeekLabel } from '@taskpaper/core';
+import type {
+  CalendarScope,
+  SourcedCalendarModel,
+  SourcedOccurrence,
+} from './calendarSources';
 
 /** Weekday glyph by Date#getDay() index. */
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
@@ -23,18 +15,30 @@ function shiftMonth(anchor: string, n: number): string {
   return isoMonth(new Date(y, m - 1 + n, 1));
 }
 
-/** What the embedded calendar needs from its owner (the TaskPaper view). */
+/**
+ * What the embedded calendar needs from its owner. The host is source-aware
+ * (see createCalendarHost): occurrences carry {path, line, fingerprint}
+ * identity, and all staleness guards + Notices live host-side, so the pane
+ * renders and delegates without scope conditionals.
+ */
 export interface CalendarHost {
-  /** The source document's current editor state. */
-  state(): EditorState;
-  /** Move the editor to a 0-based line (the pane has already verified it). */
-  jumpToLine(line: number): void;
+  /** The merged month model over the current scope. */
+  getOccurrences(monthAnchor: string, opts: CalendarOptions, today: Date): SourcedCalendarModel;
+  /** Render-guard token: a different value invalidates the cached render. */
+  version(): string;
+  /** Drag-guard token: a drop is refused when it changed since dragstart. */
+  changeToken(): unknown;
   /** First day of the week: 1 = Monday, 0 = Sunday (user setting). */
   weekStart(): number;
   /** Whether the month grid shows ISO week labels (W627). */
   showWeekNumbers(): boolean;
-  /** Replace one line's text as a single undoable transaction (drag-reschedule). */
-  setLineText(line: number, text: string): void;
+  /** 本檔 (own file) ⇄ 全部 (every .taskpaper file), persisted as a setting. */
+  scope(): CalendarScope;
+  setScope(scope: CalendarScope): void;
+  /** Jump to an occurrence's source line (the host verifies it first). */
+  openOccurrence(occ: SourcedOccurrence): void;
+  /** Rewrite an occurrence's date tag (drag-reschedule). */
+  rescheduleOccurrence(occ: SourcedOccurrence, date: string): void;
 }
 
 /**
@@ -55,9 +59,9 @@ export class CalendarPane {
   private midnightTimer: number | null = null;
   private active = false;
   /** The occurrence being dragged to another date, while a drag is live. */
-  private dragOcc: CalendarOccurrence | null = null;
-  /** Document snapshot at dragstart — a changed doc rejects the drop. */
-  private dragDoc: unknown = null;
+  private dragOcc: SourcedOccurrence | null = null;
+  /** Change token at dragstart — a changed scope rejects the drop. */
+  private dragToken: unknown = null;
 
   constructor(
     private containerEl: HTMLElement,
@@ -103,7 +107,6 @@ export class CalendarPane {
     if (!this.active) {
       return; // hidden pane — the next setActive(true) does a full render
     }
-    const state = this.host.state();
     const today = this.now();
     if (this.monthAnchor === null) {
       this.monthAnchor = isoMonth(today);
@@ -111,7 +114,8 @@ export class CalendarPane {
     const weekStart = this.host.weekStart();
     const weekNumbers = this.host.showWeekNumbers();
     const signature = [
-      state.doc.length,
+      this.host.version(),
+      this.host.scope(),
       this.monthAnchor,
       this.mode,
       this.showCompleted,
@@ -128,8 +132,7 @@ export class CalendarPane {
     container.empty();
     container.addClass('taskpaper-calendar');
 
-    const model = calendarModel(
-      outlineOf(state),
+    const model = this.host.getOccurrences(
       this.monthAnchor,
       { showCompleted: this.showCompleted, weekStart },
       today,
@@ -144,7 +147,7 @@ export class CalendarPane {
     }
   }
 
-  /** Toolbar: ‹ 今天 › · month · mode toggle · 顯示已完成. */
+  /** Toolbar: ‹ 今天 › · month · scope toggle · mode toggle · 顯示已完成. */
   private renderToolbar(container: HTMLElement): void {
     const header = container.createDiv({ cls: 'tp-cal-header' });
     const toolbar = header.createDiv({ cls: 'tp-cal-toolbar' });
@@ -172,6 +175,25 @@ export class CalendarPane {
     toolbar.createSpan({ cls: 'tp-cal-month-label', text: `${y}年${m}月` });
 
     const right = toolbar.createDiv({ cls: 'tp-cal-toolbar-right' });
+    // 本檔 | 全部 — segmented scope toggle, persisted by the host.
+    const scopeWrap = right.createDiv({ cls: 'tp-cal-scope' });
+    const scopeBtn = (label: string, value: CalendarScope) => {
+      const active = this.host.scope() === value;
+      const btn = scopeWrap.createEl('button', {
+        cls: active ? 'tp-cal-btn tp-cal-scope-btn is-active' : 'tp-cal-btn tp-cal-scope-btn',
+        text: label,
+        attr: { 'data-scope': value },
+      });
+      btn.onclick = () => {
+        if (this.host.scope() !== value) {
+          this.host.setScope(value);
+          this.render(true);
+        }
+      };
+    };
+    scopeBtn('本檔', 'file');
+    scopeBtn('全部', 'vault');
+
     const modeBtn = right.createEl('button', {
       cls: 'tp-cal-btn tp-cal-mode',
       attr: { 'aria-label': this.mode === 'month' ? '列表' : '月曆格' },
@@ -192,34 +214,38 @@ export class CalendarPane {
   }
 
   /** The colored-dot class for an occurrence (overdue wins over plain due). */
-  private roleClass(occ: CalendarOccurrence, todayStr: string): string {
+  private roleClass(occ: SourcedOccurrence, todayStr: string): string {
     if (occ.role === 'due' && occ.date < todayStr) {
       return 'tp-cal-dot-overdue';
     }
     return `tp-cal-dot-${occ.role}`;
   }
 
-  /** A clickable occurrence row: colored dot + tag-stripped title. */
+  /** A clickable occurrence row: colored dot + tag-stripped title (+ a dim
+   *  file badge when the occurrence comes from another document). */
   private renderOccurrence(
     parent: HTMLElement,
-    occ: CalendarOccurrence,
+    occ: SourcedOccurrence,
     todayStr: string,
     breadcrumb: string | undefined,
   ): void {
     const el = parent.createDiv({
       cls: 'tp-cal-occ',
-      attr: { 'data-line': occ.line, draggable: 'true' },
+      attr: { 'data-line': occ.line, 'data-path': occ.source.path, draggable: 'true' },
     });
     el.createSpan({ cls: `tp-cal-dot ${this.roleClass(occ, todayStr)}` });
     el.createSpan({ cls: 'tp-cal-occ-text', text: occ.text || '(空白項目)' });
+    if (occ.badge) {
+      el.createSpan({ cls: 'tp-cal-occ-badge', text: occ.badge });
+    }
     if (breadcrumb) {
       el.createSpan({ cls: 'tp-cal-occ-path', text: breadcrumb });
     }
     el.setAttr('title', occ.projectPath ? `${occ.text} — ${occ.projectPath}` : occ.text);
-    el.onclick = () => this.openOccurrence(occ);
+    el.onclick = () => this.host.openOccurrence(occ);
     el.addEventListener('dragstart', (e: DragEvent) => {
       this.dragOcc = occ;
-      this.dragDoc = this.host.state().doc;
+      this.dragToken = this.host.changeToken();
       el.addClass('is-dragging');
       if (e.dataTransfer) {
         e.dataTransfer.effectAllowed = 'move';
@@ -228,7 +254,7 @@ export class CalendarPane {
     });
     el.addEventListener('dragend', () => {
       this.dragOcc = null;
-      this.dragDoc = null;
+      this.dragToken = null;
       el.removeClass('is-dragging');
       this.clearDropTargets();
     });
@@ -258,41 +284,25 @@ export class CalendarPane {
       e.preventDefault();
       this.clearDropTargets();
       const occ = this.dragOcc;
-      const doc = this.dragDoc;
+      const token = this.dragToken;
       this.dragOcc = null;
-      this.dragDoc = null;
-      if (occ && occ.date !== date) {
-        this.rescheduleTo(occ, date, doc);
+      this.dragToken = null;
+      if (!occ || occ.date === date) {
+        return;
       }
+      // Anything in scope changed mid-drag → the model behind the drag is
+      // stale; refuse rather than rewrite a possibly different line.
+      if (this.host.changeToken() !== token) {
+        new Notice('文件已變更，未改期——行事曆已重新整理。');
+        this.render(true);
+        return;
+      }
+      this.host.rescheduleOccurrence(occ, date);
+      this.render(true);
     });
   }
 
-  /** Rewrite the dragged occurrence's date tag — guarded like openOccurrence. */
-  private rescheduleTo(occ: CalendarOccurrence, date: string, dragDoc: unknown): void {
-    const state = this.host.state();
-    const fingerprint = (line: string): string =>
-      stripTags(line.replace(/^[\t ]*(?:-\s*)?/, ''));
-    const stale =
-      state.doc !== dragDoc ||
-      occ.line + 1 > state.doc.lines ||
-      fingerprint(state.doc.line(occ.line + 1).text) !== occ.text.trim();
-    if (stale) {
-      new Notice('文件已變更，未改期——行事曆已重新整理。');
-      this.render(true);
-      return;
-    }
-    const lineText = state.doc.line(occ.line + 1).text;
-    // @today items become dated (@today is replaced, per the agreed design);
-    // completed items move their @done date; everything else is @due.
-    const next =
-      occ.role === 'today'
-        ? addTag(removeTag(lineText, 'today'), 'due', date)
-        : setTagValue(lineText, occ.role === 'completed' ? 'done' : 'due', date);
-    this.host.setLineText(occ.line, next);
-    this.render(true);
-  }
-
-  private renderMonthGrid(container: HTMLElement, model: CalendarModel, todayStr: string): void {
+  private renderMonthGrid(container: HTMLElement, model: SourcedCalendarModel, todayStr: string): void {
     const weekStart = this.host.weekStart();
     const weekNumbers = this.host.showWeekNumbers();
     const grid = container.createDiv({
@@ -355,7 +365,7 @@ export class CalendarPane {
     return heading;
   }
 
-  private renderAgenda(container: HTMLElement, model: CalendarModel, todayStr: string): void {
+  private renderAgenda(container: HTMLElement, model: SourcedCalendarModel, todayStr: string): void {
     const list = container.createDiv({ cls: 'tp-cal-agenda' });
     if (model.overdue.length > 0) {
       const section = list.createDiv({ cls: 'tp-cal-section tp-cal-overdue' });
@@ -386,24 +396,5 @@ export class CalendarPane {
         this.renderOccurrence(section, occ, todayStr, occ.projectPath);
       }
     }
-  }
-
-  /** Jump to the occurrence's source line — unless the document has drifted. */
-  private openOccurrence(occ: CalendarOccurrence): void {
-    const doc = this.host.state().doc;
-    // Staleness guard: rebuild the line's tag-stripped fingerprint and require
-    // EXACT equality — a substring check could accept a different task whose
-    // title merely contains the old one, and empty titles bypassed it.
-    const fingerprint = (line: string): string =>
-      stripTags(line.replace(/^[\t ]*(?:-\s*)?/, ''));
-    const stale =
-      occ.line + 1 > doc.lines ||
-      fingerprint(doc.line(occ.line + 1).text) !== occ.text.trim();
-    if (stale) {
-      new Notice('文件已變更，找不到該項目——行事曆已重新整理。');
-      this.render(true);
-      return;
-    }
-    this.host.jumpToLine(occ.line);
   }
 }

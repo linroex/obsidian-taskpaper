@@ -1,4 +1,4 @@
-import { Menu, Notice, setIcon, TextFileView, WorkspaceLeaf } from 'obsidian';
+import { Menu, Notice, setIcon, TextFileView, TFile, WorkspaceLeaf } from 'obsidian';
 import { EditorSelection, EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { parseQuery, stripTags, todayStamp } from '@taskpaper/core';
@@ -6,6 +6,7 @@ import { outlineOf } from './editor/outline';
 import { filterSpecField, searchbarText, setFilterEffect } from './editor/filter';
 import { createEditorExtensions } from './editor/setup';
 import { CalendarPane } from './calendarPane';
+import { CalendarViewLike, createCalendarHost } from './calendarHost';
 import type { SidebarSelectionItem } from './sidebarLogic';
 import { refreshLinks, type LinkKind } from './editor/links';
 import type TaskPaperPlugin from './main';
@@ -108,23 +109,70 @@ export class TaskPaperView extends TextFileView {
       cls: 'taskpaper-calendar tp-cal-embedded',
       attr: { tabindex: '-1' },
     });
-    this.calendarPane = new CalendarPane(this.calendarEl, {
-      state: () => this.editor.state,
-      weekStart: () => this.plugin.settings.calendarWeekStart,
-      showWeekNumbers: () => this.plugin.settings.calendarShowWeekNumbers !== false,
+    this.calendarPane = new CalendarPane(
+      this.calendarEl,
+      createCalendarHost({
+        vault: this.app.vault,
+        own: () => this.calendarViewAdapter(this),
+        openViews: () => {
+          const views: CalendarViewLike[] = [];
+          for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_TASKPAPER)) {
+            const view = leaf.view;
+            if (view instanceof TaskPaperView && view.file && view.editor) {
+              views.push(this.calendarViewAdapter(view));
+            }
+          }
+          return views;
+        },
+        openFileView: (path) => this.openTaskPaperFileView(path),
+        cachedLines: (file) => this.plugin.calendarLines(file),
+        settings: this.plugin.settings,
+        saveSettings: () => void this.plugin.saveSettings(),
+        epoch: () => this.plugin.calendarEpoch,
+        refresh: () => this.refreshCalendar(),
+      }),
+    );
+  }
+
+  /** A TaskPaper view (this one or another leaf's) as the calendar host sees it. */
+  private calendarViewAdapter(view: TaskPaperView): CalendarViewLike {
+    return {
+      path: view.file?.path ?? '',
+      state: () => view.editor.state,
       setLineText: (line, text) => {
-        const doc = this.editor.state.doc.line(line + 1);
-        this.editor.dispatch({ changes: { from: doc.from, to: doc.to, insert: text } });
+        const doc = view.editor.state.doc.line(line + 1);
+        view.editor.dispatch({ changes: { from: doc.from, to: doc.to, insert: text } });
       },
       jumpToLine: (line) => {
-        this.setViewMode('editor');
-        this.editor.dispatch({
-          selection: EditorSelection.cursor(this.editor.state.doc.line(line + 1).from),
+        this.app.workspace.revealLeaf(view.leaf);
+        view.setViewMode('editor');
+        view.editor.dispatch({
+          selection: EditorSelection.cursor(view.editor.state.doc.line(line + 1).from),
           scrollIntoView: true,
         });
-        this.editor.focus();
+        view.editor.focus();
       },
-    });
+    };
+  }
+
+  /** Open a .taskpaper file in a new tab and wait until its editor is ready. */
+  private async openTaskPaperFileView(path: string): Promise<CalendarViewLike | null> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) {
+      return null;
+    }
+    const leaf = this.app.workspace.getLeaf('tab');
+    await leaf.openFile(file);
+    // openFile can resolve before the (possibly deferred) view finishes
+    // mounting — poll briefly for the editor.
+    for (let i = 0; i < 40; i++) {
+      const view = leaf.view;
+      if (view instanceof TaskPaperView && view.editor) {
+        return this.calendarViewAdapter(view);
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 50));
+    }
+    return null;
   }
 
   /** Toggle editor ⇄ calendar in the SAME tab (like markdown's reading mode). */
@@ -365,6 +413,8 @@ export class TaskPaperView extends TextFileView {
       onDocChanged: (doc) => {
         this.data = doc;
         this.requestSave();
+        // Vault-scope calendars watch every open editor via this counter.
+        this.plugin.bumpCalendarEpoch();
         // Debounced: a full sidebar rebuild per keystroke is too costly
         // on very large documents.
         this.plugin.refreshSidebarSoon();

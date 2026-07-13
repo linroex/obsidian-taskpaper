@@ -33,6 +33,13 @@ import {
   validateSelection,
   visibleTagCounts,
 } from '../src/sidebarLogic';
+import {
+  fingerprintLines,
+  lineFingerprint,
+  rescheduledLine,
+  sourcedCalendarModel,
+  TaskpaperLinesCache,
+} from '../src/calendarSources';
 
 let pass = 0;
 let fail = 0;
@@ -945,5 +952,109 @@ check('adjacent identity drop is a no-op', planFreeDrag(DRAG_DOC, 2, 1, true, 4)
   check('collapse completely on a blank line is a no-op', linesToCollapseCompletely(items, 99).length === 0);
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail === 0 ? 0 : 1);
+// ---------------------------------------------------------------------------
+// Calendar sources — the vault-wide aggregation layer (F4)
+// ---------------------------------------------------------------------------
+
+{
+  const today = new Date(2026, 6, 12);
+  const docs = [
+    {
+      path: 'b.taskpaper',
+      badge: 'b',
+      lines: ['- beta @due(2026-07-15)', '- old @due(2026-07-01)'],
+    },
+    { path: 'a.taskpaper', lines: ['- alpha @due(2026-07-15)'] },
+  ];
+  const model = sourcedCalendarModel(docs, '2026-07', { showCompleted: false, weekStart: 1 }, today);
+  const day = model.weeks.flat().find((d) => d.date === '2026-07-15')!;
+  check(
+    'merged cell occurrences sort by path then line',
+    day.occurrences.map((o) => o.text).join(',') === 'alpha,beta',
+    day.occurrences.map((o) => o.text).join(','),
+  );
+  check(
+    'occurrences carry their source identity',
+    day.occurrences[0].source.path === 'a.taskpaper' &&
+      day.occurrences[0].source.line === 0 &&
+      day.occurrences[0].source.fingerprint === 'alpha',
+  );
+  check(
+    'badges follow the source doc (own doc stays badge-less)',
+    day.occurrences[0].badge === undefined && day.occurrences[1].badge === 'b',
+  );
+  check(
+    'overdue merges across docs',
+    model.overdue.length === 1 && model.overdue[0].source.path === 'b.taskpaper',
+  );
+  const agenda15 = model.agenda.find((e) => e.date === '2026-07-15');
+  check(
+    'agenda merges dates across docs',
+    agenda15 !== undefined && agenda15.occurrences.map((o) => o.text).join(',') === 'alpha,beta',
+  );
+}
+
+{
+  check('lineFingerprint strips indent, marker and tags', lineFingerprint('\t- task @due(2026-01-01)') === 'task');
+  check(
+    'fingerprintLines returns every candidate line',
+    fingerprintLines(['- a', '- b @x', '\t- a @due(2026-01-01)'], 'a').join(',') === '0,2',
+  );
+  check(
+    'rescheduledLine rewrites @due in place',
+    rescheduledLine('\t- t @due(2026-07-01)', 'due', '2026-07-05') === '\t- t @due(2026-07-05)',
+  );
+  check(
+    'rescheduledLine converts a bare @today to @due',
+    rescheduledLine('- t @today', 'today', '2026-07-05') === '- t @due(2026-07-05)',
+  );
+  check(
+    'rescheduledLine moves @done for completed items',
+    rescheduledLine('- t @done(2026-07-01)', 'completed', '2026-07-05') === '- t @done(2026-07-05)',
+  );
+}
+
+async function calendarCacheTests(): Promise<void> {
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const reads: string[] = [];
+  let loaded = 0;
+  const cache = new TaskpaperLinesCache(
+    async (path) => {
+      reads.push(path);
+      return 'x:\n\t- y';
+    },
+    () => {
+      loaded++;
+    },
+  );
+  check('a cold cache reports null and kicks one read', cache.lines('f.taskpaper', '1:5') === null && reads.length === 1);
+  check('a repeated miss does not start a second read', cache.lines('f.taskpaper', '1:5') === null && reads.length === 1);
+  await tick();
+  check(
+    'the background read fills the cache and notifies',
+    loaded === 1 && cache.lines('f.taskpaper', '1:5')!.join('|') === 'x:|\t- y',
+  );
+  check('a changed freshness key (modify) misses and re-reads', cache.lines('f.taskpaper', '2:9') === null && reads.length === 2);
+  await tick();
+  check('the refreshed entry replaces the stale one', cache.lines('f.taskpaper', '2:9') !== null && loaded === 2);
+
+  // Rename old→new: the plugin invalidates BOTH paths; each drops its entry.
+  cache.lines('new.taskpaper', '1:1');
+  await tick();
+  check('a second path caches independently', cache.lines('new.taskpaper', '1:1') !== null);
+  cache.invalidate('f.taskpaper');
+  cache.invalidate('new.taskpaper');
+  check('rename/delete invalidation drops the entries', cache.lines('new.taskpaper', '1:1') === null && reads.length === 4);
+  check('the invalidated path is only re-read when asked again', reads[reads.length - 1] === 'new.taskpaper');
+}
+
+void calendarCacheTests().then(
+  () => {
+    console.log(`\n${pass} passed, ${fail} failed`);
+    process.exit(fail === 0 ? 0 : 1);
+  },
+  (err) => {
+    console.error(err);
+    process.exit(1);
+  },
+);
