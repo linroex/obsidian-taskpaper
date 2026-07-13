@@ -415,6 +415,21 @@ check('signature changes when file changes', sidebarSignature('a.taskpaper', 100
     wikiInUrl.length === 1 && wikiInUrl[0].kind === 'url',
     JSON.stringify(wikiInUrl),
   );
+  const wikiAfterUrl = findLinks('- see (www.example.com)[[Meeting Notes]]');
+  check(
+    'a wikilink directly after a URL keeps both links, cleanly split',
+    wikiAfterUrl.length === 2 &&
+      wikiAfterUrl[0].kind === 'www' &&
+      wikiAfterUrl[0].text === 'www.example.com' &&
+      wikiAfterUrl[1].kind === 'wiki' &&
+      wikiAfterUrl[1].text === 'Meeting Notes',
+    JSON.stringify(wikiAfterUrl),
+  );
+  check(
+    'a wikilink inside a tag value stays tag text, not a link',
+    findLinks('- read @src([[Paper]])').length === 0,
+    JSON.stringify(findLinks('- read @src([[Paper]])')),
+  );
 }
 
 // --- tag click: toggling the filter ---
@@ -996,6 +1011,15 @@ check('adjacent identity drop is a no-op', planFreeDrag(DRAG_DOC, 2, 1, true, 4)
 
 {
   check('lineFingerprint strips indent, marker and tags', lineFingerprint('\t- task @due(2026-01-01)') === 'task');
+  check(
+    'an untitled dated task falls back to its raw text, never the blank fingerprint',
+    lineFingerprint('\t- @due(2026-07-14)') === '- @due(2026-07-14)' && lineFingerprint('   ') === '',
+    lineFingerprint('\t- @due(2026-07-14)'),
+  );
+  check(
+    'an empty fingerprint matches nothing (blank lines are never targets)',
+    fingerprintLines(['- a', '', '   '], '').length === 0,
+  );
   check(
     'fingerprintLines returns every candidate line',
     fingerprintLines(['- a', '- b @x', '\t- a @due(2026-01-01)'], 'a').join(',') === '0,2',

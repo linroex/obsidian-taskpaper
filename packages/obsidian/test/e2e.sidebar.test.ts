@@ -404,6 +404,34 @@ function mountTagFixture() {
   fx.cleanup();
 }
 
+// --- dropping onto the @done row runs the full toggle-done pipeline ---
+// (Completing is more than a tag write: a @repeat task must spawn its
+// successor exactly like the dash click and the command do.)
+{
+  let hover: Element | null = null;
+  const DONE_DOC = ['Home:', '\t- pay rent @due(2026-07-01) @repeat(1m)', '\t- old @done(2026-07-01)'].join('\n');
+  const fx = mountSidebar(DONE_DOC, { elementFromPoint: (_x, y) => (y >= 100 ? hover : null) });
+  const row = fx.sidebar.contentEl.querySelector<HTMLElement>('.tp-sb-tag[data-tag-name="done"]')!;
+  check('the @done tag row renders as a drop target', row !== null);
+  hover = row;
+  fx.editor.dom.querySelector<HTMLElement>('.tp-handle[data-line="1"]')!
+    .dispatchEvent(mouse('mousedown', { clientY: 0 }));
+  window.dispatchEvent(mouse('mousemove', { clientX: 10, clientY: 150 }));
+  window.dispatchEvent(mouse('mouseup'));
+  const lines = docText(fx.editor).split('\n');
+  check(
+    'the dropped @repeat task completes with the settings stamp',
+    lines[1] === '\t- pay rent @due(2026-07-01) @repeat(1m) @done(2026-01-02)',
+    lines[1],
+  );
+  check(
+    'the recurrence spawns its successor, same as every other done gesture',
+    lines[2] === '\t- pay rent @due(2026-08-01) @repeat(1m)',
+    lines[2],
+  );
+  fx.cleanup();
+}
+
 // --- duplicate same-name tags collapse to one on drop ---
 {
   const fx = mountTagFixture();

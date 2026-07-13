@@ -11,6 +11,7 @@ import { foldEffect, unfoldEffect } from '@codemirror/language';
 import {
   buildOutline,
   focusVisibleLines,
+  hasTag,
   itemAtLine,
   moveBranchAfter,
   moveBranchBefore,
@@ -19,6 +20,7 @@ import {
   selectedRootLines,
   Outline,
 } from '@taskpaper/core';
+import { toggleDoneAtLines } from './toggleDone';
 import { setFilterEffect } from './filter';
 import { foldedRangeAtLine, subtreeFoldRange } from './folding';
 import { docLines } from './outlineEdit';
@@ -213,6 +215,9 @@ class HandleDrag {
     private onClick: () => void,
     /** Shows a user-facing warning (a Notice in production). */
     private notify: (message: string) => void,
+    /** The @done stamp per settings — a drop on the @done tag row must run
+     *  the full toggle-done pipeline (repeat spawn, @today removal). */
+    private doneStamp: () => string,
     /** Hit-test hook (injectable for tests — jsdom's elementFromPoint returns null). */
     private hitTest: (x: number, y: number) => Element | null = (x, y) =>
       document.elementFromPoint(x, y),
@@ -368,6 +373,17 @@ class HandleDrag {
       this.notify(DRAG_ASSIGN_ABORT_NOTICE);
       return;
     }
+    if (name === 'done') {
+      // Completing is more than a tag write (repeat spawn, @today removal):
+      // route through the same pipeline as the dash click and the command.
+      // Only not-yet-done roots — a toggle would UN-complete the others.
+      const lines = docLines(this.view.state);
+      const undone = this.dragRoots.filter((l) => !hasTag(lines[l] ?? '', 'done'));
+      if (undone.length > 0) {
+        toggleDoneAtLines(this.view, undone, this.doneStamp(), this.notify);
+      }
+      return;
+    }
     const changes = planAssignTag(
       docLines(this.view.state),
       this.dragRoots,
@@ -409,6 +425,8 @@ export interface HandleOptions {
   onFocus(line: number): void;
   /** Show a user-facing warning (a Notice in production). */
   notify(message: string): void;
+  /** The @done stamp to apply (already formatted per settings). */
+  doneStamp(): string;
   /** Hit-test hook for drags over the sidebar (injectable for tests;
    *  defaults to document.elementFromPoint, which jsdom cannot provide). */
   elementFromPoint?(x: number, y: number): Element | null;
@@ -480,6 +498,7 @@ export function itemHandles(opts: HandleOptions) {
             event,
             () => toggleHandleFold(view, line),
             (message) => opts.notify(message),
+            () => opts.doneStamp(),
             opts.elementFromPoint,
           );
           return true;

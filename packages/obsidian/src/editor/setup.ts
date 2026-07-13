@@ -79,6 +79,7 @@ export function createEditorExtensions(host: EditorHost): Extension[] {
         host.refresh();
       },
       notify: (message) => host.notify(message),
+      doneStamp: () => host.doneStamp(),
       elementFromPoint: host.elementFromPoint?.bind(host),
     }),
     tagAutocomplete,

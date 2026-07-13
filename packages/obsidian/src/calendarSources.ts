@@ -58,13 +58,19 @@ export interface SourcedCalendarModel {
   agenda: Array<{ date: string; occurrences: SourcedOccurrence[] }>;
 }
 
-/** The staleness-guard fingerprint of a raw line (tag-stripped, marker removed). */
+/** The staleness-guard fingerprint of a raw line (tag-stripped, marker
+ *  removed). An untitled dated task strips to nothing — fall back to the
+ *  trimmed raw text so it never shares the blank lines' empty fingerprint. */
 export function lineFingerprint(line: string): string {
-  return stripTags(line.replace(/^[\t ]*(?:-\s*)?/, ''));
+  return stripTags(line.replace(/^[\t ]*(?:-\s*)?/, '')) || line.trim();
 }
 
-/** All 0-based lines whose fingerprint matches — callers refuse on 0 or >1. */
+/** All 0-based lines whose fingerprint matches — callers refuse on 0 or >1.
+ *  An empty fingerprint matches nothing (blank lines are never targets). */
 export function fingerprintLines(lines: string[], fingerprint: string): number[] {
+  if (fingerprint.length === 0) {
+    return [];
+  }
   const found: number[] = [];
   for (let i = 0; i < lines.length; i++) {
     if (lineFingerprint(lines[i]) === fingerprint) {
@@ -186,7 +192,12 @@ export class TaskpaperLinesCache {
         (data) => {
           this.pending.delete(path);
           if ((this.generation.get(path) ?? 0) !== gen) {
-            return; // invalidated mid-read — the content may be stale
+            // Invalidated mid-read: drop the possibly-stale content, but
+            // still notify so the next render re-requests (and re-reads) —
+            // otherwise the file would stay missing until something else
+            // happens to refresh.
+            this.onLoaded();
+            return;
           }
           this.entries.set(path, { key, lines: data.split('\n') });
           this.onLoaded();

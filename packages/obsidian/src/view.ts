@@ -215,10 +215,13 @@ export class TaskPaperView extends TextFileView {
     this.contentEl.style.setProperty('--tp-split', String(ratio));
   }
 
-  /** Re-render the embedded calendar when it is the active mode. */
+  /** Re-render the embedded calendar when it is the active mode. The pane's
+   *  render signature (host version = epoch + doc length) skips the rebuild
+   *  when nothing calendar-relevant changed — sidebar refreshes fire this on
+   *  every keystroke debounce, so forcing would re-parse the whole vault. */
   refreshCalendar(): void {
     if (this.viewMode === 'calendar') {
-      this.calendarPane.render(true);
+      this.calendarPane.render();
     }
   }
 
@@ -518,7 +521,9 @@ export class TaskPaperView extends TextFileView {
       effects: setFilterEffect.of(null),
     });
     this.applyingExternalData = false;
-    // External reloads bypass onDocChanged — keep an active calendar current.
+    // External reloads bypass onDocChanged — the content still changed, so
+    // the epoch must move or the render-signature cache would skip them.
+    this.plugin.bumpCalendarEpoch();
     this.refreshCalendar();
   }
 

@@ -57,13 +57,31 @@ function classifyTarget(target: string): LinkKind {
 export function findLinks(lineText: string): LinkRange[] {
   const links: LinkRange[] = [];
 
+  // Tag ranges, so a generic `scheme:path` never swallows a tag value
+  // (`@z(note:abc)` stays a clickable tag, not a link) and a wikilink inside
+  // a tag value (`@src([[Paper]])`) stays tag text.
+  let tagRanges: { start: number; end: number }[] | null = null;
+  const insideTag = (from: number, to: number): boolean => {
+    tagRanges ??= parseTags(lineText).map((t) => ({ start: t.start, end: t.end }));
+    return tagRanges.some((t) => from >= t.start && to <= t.end);
+  };
+
   // Bare URLs win over wikilinks embedded in them: `https://x.com/[[a]]` is
-  // one clickable URL, not a wikilink surrounded by URL fragments.
+  // one clickable URL, not a wikilink surrounded by URL fragments. A `[[`
+  // NOT preceded by `/` isn't a path segment, though — `www.x.com)[[Note]]`
+  // is a URL followed by a real wikilink, so the span stops there.
   const urlSpans: { start: number; end: number }[] = [];
   const URL_SPAN_RE = /(?:https?|file):\/\/[^\s]+|www\.[^\s]+/g;
   let us: RegExpExecArray | null;
   while ((us = URL_SPAN_RE.exec(lineText))) {
-    urlSpans.push({ start: us.index, end: us.index + us[0].length });
+    let span = us[0];
+    const wiki = span.indexOf('[[');
+    if (wiki !== -1 && span[wiki - 1] !== '/') {
+      span = span.slice(0, wiki);
+    }
+    if (span.length > 0) {
+      urlSpans.push({ start: us.index, end: us.index + span.length });
+    }
   }
 
   // Wikilinks next — their spans suppress the markdown-link and raw-URL
@@ -85,6 +103,10 @@ export function findLinks(lineText: string): LinkRange[] {
       continue;
     }
     if (urlSpans.some((r) => wl!.index < r.end && wl!.index + wl![0].length > r.start)) {
+      continue;
+    }
+    // A wikilink inside a tag's value belongs to the tag, not a link.
+    if (insideTag(wl.index, wl.index + wl[0].length)) {
       continue;
     }
     const inner = wl[1];
@@ -137,13 +159,6 @@ export function findLinks(lineText: string): LinkRange[] {
   }
   const insideMd = (from: number, to: number): boolean =>
     mdSpans.some((r) => from < r.end && to > r.start);
-  // Tag ranges, so a generic `scheme:path` never swallows a tag value
-  // (`@z(note:abc)` stays a clickable tag, not a link).
-  let tagRanges: { start: number; end: number }[] | null = null;
-  const insideTag = (from: number, to: number): boolean => {
-    tagRanges ??= parseTags(lineText).map((t) => ({ start: t.start, end: t.end }));
-    return tagRanges.some((t) => from >= t.start && to <= t.end);
-  };
   LINK_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = LINK_RE.exec(lineText))) {
@@ -153,6 +168,11 @@ export function findLinks(lineText: string): LinkRange[] {
       continue;
     }
     let text = m[0];
+    // A `[[` that isn't a path segment starts a wikilink — the URL ends there.
+    const wikiCut = text.indexOf('[[');
+    if (wikiCut > 0 && text[wikiCut - 1] !== '/') {
+      text = text.slice(0, wikiCut);
+    }
     // Trim trailing punctuation; keep a `)` only when balanced by a `(` inside.
     const trimmed = text.replace(TRAILING, '');
     if (trimmed.length < text.length) {

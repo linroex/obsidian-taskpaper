@@ -444,17 +444,36 @@ async function vaultScopeTests(): Promise<void> {
     fx.cleanup();
   }
 
-  // --- duplicate identical lines in the foreign file: ambiguous, refuse ---
+  // --- duplicate identical lines: the recorded line wins while it matches ---
   {
     const fx = mountCalendar(DOC);
     await fx.vault.create('dup.taskpaper', '- dup @due(2026-07-15)\n- dup @due(2026-07-15)\n');
     fx.scopeButton('全部')!.click();
     await settle();
-    const before = fx.vault.contents.get('dup.taskpaper');
+    dragTo(fx, 'dup', '2026-07-20');
+    await settle();
+    check(
+      'a duplicate-text task reschedules at its recorded line (no false ambiguity)',
+      fx.vault.contents.get('dup.taskpaper') === '- dup @due(2026-07-20)\n- dup @due(2026-07-15)\n',
+      JSON.stringify(fx.vault.contents.get('dup.taskpaper')),
+    );
+    fx.cleanup();
+  }
+
+  // --- drifted foreign file + duplicate fingerprints: ambiguous, refuse ---
+  {
+    const fx = mountCalendar(DOC);
+    await fx.vault.create('dup2.taskpaper', '- dup @due(2026-07-15)\n- dup @due(2026-07-15)\n');
+    fx.scopeButton('全部')!.click();
+    await settle();
+    // The file drifts behind the calendar's back (no vault event): the
+    // recorded lines no longer match, and the fingerprint scan finds two.
+    const drifted = '- x\n- y\n- dup @due(2026-07-15)\n- dup @due(2026-07-15)\n';
+    fx.vault.contents.set('dup2.taskpaper', drifted);
     const notices = Notice.messages.length;
     dragTo(fx, 'dup', '2026-07-20');
     await settle();
-    check('an ambiguous fingerprint leaves the file unchanged', fx.vault.contents.get('dup.taskpaper') === before);
+    check('an ambiguous fingerprint leaves the file unchanged', fx.vault.contents.get('dup2.taskpaper') === drifted);
     check(
       'the refusal shows a zh-TW Notice',
       Notice.messages.slice(notices).some((m) => m.includes('多個相同項目')),

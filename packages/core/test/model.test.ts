@@ -1371,6 +1371,20 @@ check('toggle from none focuses', toggleFocusTarget(null, 3) === 3);
     normalizeCaptureText('X: @m(a \\) b)', capNow) === 'X: @m(a \\) b)',
     normalizeCaptureText('X: @m(a \\) b)', capNow),
   );
+
+  // Insertion follows the project's ACTUAL indentation, not tree-level tabs —
+  // a space-indented document keeps its convention (a tab would nest the new
+  // task under the last task instead of the project).
+  check(
+    'capture: space-indented documents keep their indent convention',
+    apply('Inbox:\n  - a\n', '- new', 'Inbox') === 'Inbox:\n  - a\n  - new\n',
+    JSON.stringify(apply('Inbox:\n  - a\n', '- new', 'Inbox')),
+  );
+  check(
+    'capture: a deeper-than-level project indents its first child from its own line',
+    apply('A:\n\t\tB:\n', '- new', 'A/B') === 'A:\n\t\tB:\n\t\t\t- new\n',
+    JSON.stringify(apply('A:\n\t\tB:\n', '- new', 'A/B')),
+  );
 }
 
 function setEq(a: Set<number>, b: Set<number>): boolean {

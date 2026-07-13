@@ -96,19 +96,34 @@ export function planCapture(
   if (matched && depth === segments.length) {
     return {
       insertLine: afterSubtree(matched, lines),
-      insertText: '\t'.repeat(matched.level + 1) + taskText,
+      insertText: childIndent(matched, lines) + taskText,
     };
   }
 
   // Create the missing tail of the path under the deepest existing prefix.
   const insertLine = matched ? afterSubtree(matched, lines) : documentEnd(lines);
-  const baseLevel = matched ? matched.level + 1 : 0;
+  const base = matched ? childIndent(matched, lines) : '';
   const created: string[] = [];
   for (let i = depth; i < segments.length; i++) {
-    created.push('\t'.repeat(baseLevel + (i - depth)) + segments[i] + ':');
+    created.push(base + '\t'.repeat(i - depth) + segments[i] + ':');
   }
-  created.push('\t'.repeat(baseLevel + (segments.length - depth)) + taskText);
+  created.push(base + '\t'.repeat(segments.length - depth) + taskText);
   return { insertLine, insertText: created.join('\n') };
+}
+
+/**
+ * The indentation for a new direct child of `project`: copy the last direct
+ * child's ACTUAL leading whitespace (a space-indented document keeps its
+ * convention, a deeper-than-level project keeps its offset). With no children
+ * yet, the project's own indent plus one tab.
+ */
+function childIndent(project: Item, lines: string[]): string {
+  const last = project.children[project.children.length - 1];
+  const from = last ? lines[last.line] : null;
+  if (from !== null) {
+    return /^[\t ]*/.exec(from)?.[0] ?? '';
+  }
+  return (/^[\t ]*/.exec(lines[project.line])?.[0] ?? '') + '\t';
 }
 
 /**

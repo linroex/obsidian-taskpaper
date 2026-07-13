@@ -128,6 +128,12 @@ export class CalendarPane {
     }
     this.renderedSignature = signature;
 
+    // Rebuilding destroys the dragged element, so its dragend never fires —
+    // clear the drag state here or a LATER unrelated drop could reschedule
+    // the occurrence left behind.
+    this.dragOcc = null;
+    this.dragToken = null;
+
     const container = this.containerEl;
     container.empty();
     container.addClass('taskpaper-calendar');

@@ -93,8 +93,25 @@ export default class TaskPaperPlugin extends Plugin {
       this.calendarEpoch++;
       this.refreshCalendarsSoon();
     };
+    // 'modify' of a file open in a TaskPaper view is its own debounced
+    // autosave echoing back — onDocChanged already bumped the epoch at the
+    // keystroke, and a second bump here would spuriously refuse a calendar
+    // drag started in between. Only the (closed-file) cache needs dropping.
+    const modifyEvent = (file: TAbstractFile) => {
+      const openHere =
+        file instanceof TFile &&
+        file.extension === 'taskpaper' &&
+        this.app.workspace
+          .getLeavesOfType(VIEW_TYPE_TASKPAPER)
+          .some((leaf) => leaf.view instanceof TaskPaperView && leaf.view.file?.path === file.path);
+      if (openHere) {
+        this.calendarLinesCache.invalidate(file.path);
+        return;
+      }
+      calendarVaultEvent(file);
+    };
     this.registerEvent(this.app.vault.on('create', (file) => calendarVaultEvent(file)));
-    this.registerEvent(this.app.vault.on('modify', (file) => calendarVaultEvent(file)));
+    this.registerEvent(this.app.vault.on('modify', (file) => modifyEvent(file)));
     this.registerEvent(this.app.vault.on('delete', (file) => calendarVaultEvent(file)));
     this.registerEvent(this.app.vault.on('rename', (file, oldPath) => calendarVaultEvent(file, oldPath)));
 

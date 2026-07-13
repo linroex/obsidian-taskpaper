@@ -96,8 +96,19 @@ export function createCalendarHost(ctx: CalendarHostContext): CalendarHost {
     return stale ? null : occ.source.line;
   };
 
-  /** Re-locate a foreign occurrence purely by fingerprint. */
+  /** Re-locate a foreign occurrence: the recorded line wins while it still
+   *  matches (so duplicate-text tasks stay usable, same trust model as the
+   *  own file); only a drifted document falls back to the fingerprint scan,
+   *  which refuses on 0 or >1 candidates. */
   const foreignLine = (lines: string[], occ: SourcedOccurrence): number | 'missing' | 'ambiguous' => {
+    const recorded = occ.source.line;
+    if (
+      recorded < lines.length &&
+      occ.source.fingerprint.length > 0 &&
+      lineFingerprint(lines[recorded]) === occ.source.fingerprint
+    ) {
+      return recorded;
+    }
     const candidates = fingerprintLines(lines, occ.source.fingerprint);
     if (candidates.length === 1) {
       return candidates[0];
@@ -130,8 +141,11 @@ export function createCalendarHost(ctx: CalendarHostContext): CalendarHost {
     },
 
     version() {
-      const length = ctx.own().state().doc.length;
-      return scope() === 'file' ? String(length) : `${length}|${ctx.epoch()}`;
+      // The epoch covers every content change (own edits bump it via
+      // onDocChanged, vault events for closed files bump it in main.ts), so
+      // refreshes can trust the render-signature cache instead of forcing a
+      // full rebuild. Doc length guards the own file's external reloads.
+      return `${ctx.own().state().doc.length}|${ctx.epoch()}`;
     },
 
     changeToken() {
