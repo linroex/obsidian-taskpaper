@@ -164,6 +164,8 @@ export class TFolder {
 
 export class TFile {
   parent: TFolder | null = new TFolder();
+  /** Freshness key for caches (create/process keep it current). */
+  stat = { mtime: 0, size: 0 };
   constructor(
     public path = 'test.taskpaper',
     public basename = 'test',
@@ -220,6 +222,11 @@ export class Workspace {
   getRightLeaf(_split: boolean): WorkspaceLeaf | null {
     return new WorkspaceLeaf();
   }
+  getLeaf(_type?: unknown): WorkspaceLeaf {
+    const leaf = new WorkspaceLeaf();
+    this.leaves.push(leaf);
+    return leaf;
+  }
   revealLeaf(_leaf: WorkspaceLeaf): void {}
   async openLinkText(linktext: string, sourcePath: string): Promise<void> {
     this.openedLinkTexts.push({ linktext, sourcePath });
@@ -235,13 +242,33 @@ export class Vault {
   /** Recorded create/createFolder calls, in order. */
   created: string[] = [];
   createdFolders: string[] = [];
+  private handlers = new Map<string, Array<(...args: unknown[]) => void>>();
+  private mtime = 1;
 
+  on(name: string, cb: (...args: unknown[]) => void): { name: string; cb: unknown } {
+    const list = this.handlers.get(name) ?? [];
+    list.push(cb);
+    this.handlers.set(name, list);
+    return { name, cb };
+  }
+  trigger(name: string, ...args: unknown[]): void {
+    for (const cb of this.handlers.get(name) ?? []) {
+      cb(...args);
+    }
+  }
   getAbstractFileByPath(path: string): TFile | TFolder | null {
     return this.files.get(path) ?? this.folders.get(path) ?? null;
+  }
+  getFiles(): TFile[] {
+    return [...this.files.values()];
+  }
+  async cachedRead(file: TFile): Promise<string> {
+    return this.contents.get(file.path) ?? '';
   }
   async create(path: string, data: string): Promise<TFile> {
     const base = path.split('/').pop() ?? path;
     const file = new TFile(path, base.replace(/\.[^.]+$/, ''), base.split('.').pop() ?? '');
+    file.stat = { mtime: this.mtime++, size: data.length };
     this.files.set(path, file);
     this.contents.set(path, data);
     this.created.push(path);
@@ -256,6 +283,8 @@ export class Vault {
   async process(file: TFile, fn: (data: string) => string): Promise<string> {
     const next = fn(this.contents.get(file.path) ?? '');
     this.contents.set(file.path, next);
+    file.stat = { mtime: this.mtime++, size: next.length };
+    this.trigger('modify', file);
     return next;
   }
 }
@@ -268,7 +297,12 @@ export class App {
 
 export class WorkspaceLeaf {
   view: unknown = null;
+  /** Files opened in this leaf, for assertions (no view is mounted). */
+  openedFiles: TFile[] = [];
   async setViewState(_state: unknown): Promise<void> {}
+  async openFile(file: TFile): Promise<void> {
+    this.openedFiles.push(file);
+  }
 }
 
 // ---------------------------------------------------------------------------

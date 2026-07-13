@@ -1,0 +1,203 @@
+/**
+ * Vault-wide calendar aggregation — a layer OVER core's single-outline
+ * calendarModel. Each source document is modeled separately and the results
+ * are merged, with every occurrence tagged by its source identity
+ * {path, line, fingerprint} so the host can re-locate lines later.
+ *
+ * Pure module: no 'obsidian' imports, so it is unit-testable headless.
+ */
+import {
+  addTag,
+  buildOutline,
+  calendarModel,
+  CalendarOccurrence,
+  CalendarOptions,
+  CalendarRole,
+  removeTag,
+  setTagValue,
+  stripTags,
+} from '@taskpaper/core';
+import { OUTLINE_TAB_SIZE } from './editor/outline';
+
+/** Which documents feed the calendar: the view's own file, or every .taskpaper file. */
+export type CalendarScope = 'file' | 'vault';
+
+/** Where an occurrence came from — enough to find its line again later. */
+export interface OccurrenceSource {
+  path: string;
+  /** 0-based line at model time (the document may have drifted since). */
+  line: number;
+  /** Tag-stripped line text minus marker — the re-location key. */
+  fingerprint: string;
+}
+
+export interface SourcedOccurrence extends CalendarOccurrence {
+  source: OccurrenceSource;
+  /** File basename shown as a dim badge — set only for foreign documents. */
+  badge?: string;
+}
+
+/** One document feeding the aggregated model. */
+export interface CalendarSourceDoc {
+  path: string;
+  lines: string[];
+  /** Basename badge for the doc's occurrences (omit for the pane's own file). */
+  badge?: string;
+}
+
+export interface SourcedCalendarDay {
+  date: string;
+  inMonth: boolean;
+  occurrences: SourcedOccurrence[];
+}
+
+export interface SourcedCalendarModel {
+  month: string;
+  weeks: SourcedCalendarDay[][];
+  overdue: SourcedOccurrence[];
+  agenda: Array<{ date: string; occurrences: SourcedOccurrence[] }>;
+}
+
+/** The staleness-guard fingerprint of a raw line (tag-stripped, marker removed). */
+export function lineFingerprint(line: string): string {
+  return stripTags(line.replace(/^[\t ]*(?:-\s*)?/, ''));
+}
+
+/** All 0-based lines whose fingerprint matches — callers refuse on 0 or >1. */
+export function fingerprintLines(lines: string[], fingerprint: string): number[] {
+  const found: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lineFingerprint(lines[i]) === fingerprint) {
+      found.push(i);
+    }
+  }
+  return found;
+}
+
+/** The rescheduled line text: @today items become dated (@today is replaced,
+ *  per the agreed design); completed items move their @done date; everything
+ *  else is @due. */
+export function rescheduledLine(lineText: string, role: CalendarRole, date: string): string {
+  return role === 'today'
+    ? addTag(removeTag(lineText, 'today'), 'due', date)
+    : setTagValue(lineText, role === 'completed' ? 'done' : 'due', date);
+}
+
+/** Ordering that keeps DOM identity stable across renders: path, then line. */
+function byPathLine(a: SourcedOccurrence, b: SourcedOccurrence): number {
+  return a.source.path < b.source.path
+    ? -1
+    : a.source.path > b.source.path
+      ? 1
+      : a.source.line - b.source.line;
+}
+
+/**
+ * Build the merged month model over several documents. Every document shares
+ * the same grid (same anchor/weekStart/today), so cells merge index-wise;
+ * per-date occurrence order is (path, line) and overdue is (date, path, line).
+ */
+export function sourcedCalendarModel(
+  docs: CalendarSourceDoc[],
+  monthAnchor: string,
+  opts: CalendarOptions,
+  today: Date,
+): SourcedCalendarModel {
+  const tagged = docs.map((doc) => {
+    const model = calendarModel(buildOutline(doc.lines, OUTLINE_TAB_SIZE), monthAnchor, opts, today);
+    // One occurrence object can appear in weeks AND overdue/agenda — tag via
+    // a map so the sourced wrapper keeps that shared identity.
+    const wrapped = new Map<CalendarOccurrence, SourcedOccurrence>();
+    const wrap = (occ: CalendarOccurrence): SourcedOccurrence => {
+      let sourced = wrapped.get(occ);
+      if (!sourced) {
+        sourced = {
+          ...occ,
+          source: { path: doc.path, line: occ.line, fingerprint: occ.text.trim() },
+          badge: doc.badge,
+        };
+        wrapped.set(occ, sourced);
+      }
+      return sourced;
+    };
+    return { model, wrap };
+  });
+
+  const first = tagged[0].model;
+  const weeks: SourcedCalendarDay[][] = first.weeks.map((week, w) =>
+    week.map((day, d) => ({
+      date: day.date,
+      inMonth: day.inMonth,
+      occurrences: tagged
+        .flatMap(({ model, wrap }) => model.weeks[w][d].occurrences.map(wrap))
+        .sort(byPathLine),
+    })),
+  );
+
+  const overdue = tagged
+    .flatMap(({ model, wrap }) => model.overdue.map(wrap))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : byPathLine(a, b)));
+
+  const agendaByDate = new Map<string, SourcedOccurrence[]>();
+  for (const { model, wrap } of tagged) {
+    for (const entry of model.agenda) {
+      let list = agendaByDate.get(entry.date);
+      if (!list) {
+        list = [];
+        agendaByDate.set(entry.date, list);
+      }
+      list.push(...entry.occurrences.map(wrap));
+    }
+  }
+  const agenda = [...agendaByDate.keys()]
+    .sort()
+    .map((date) => ({ date, occurrences: agendaByDate.get(date)!.sort(byPathLine) }));
+
+  return { month: first.month, weeks, overdue, agenda };
+}
+
+/**
+ * Per-file line cache for closed documents, keyed path + a caller-provided
+ * freshness key (mtime:size). Reads are async; `lines` returns what is cached
+ * NOW and kicks one background read on a miss — `onLoaded` fires after each
+ * fill so the owner can refresh any active calendar.
+ */
+export class TaskpaperLinesCache {
+  private entries = new Map<string, { key: string; lines: string[] }>();
+  private pending = new Set<string>();
+
+  constructor(
+    private read: (path: string) => Promise<string>,
+    private onLoaded: () => void,
+  ) {}
+
+  lines(path: string, key: string): string[] | null {
+    const entry = this.entries.get(path);
+    if (entry && entry.key === key) {
+      return entry.lines;
+    }
+    if (!this.pending.has(path)) {
+      this.pending.add(path);
+      this.read(path).then(
+        (data) => {
+          this.pending.delete(path);
+          this.entries.set(path, { key, lines: data.split('\n') });
+          this.onLoaded();
+        },
+        () => {
+          this.pending.delete(path);
+        },
+      );
+    }
+    return null;
+  }
+
+  /** Drop one path (vault modify/delete, and both ends of a rename). */
+  invalidate(path: string): void {
+    this.entries.delete(path);
+  }
+
+  clear(): void {
+    this.entries.clear();
+  }
+}

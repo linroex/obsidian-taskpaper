@@ -1,9 +1,10 @@
-import { Notice, Plugin, TFile, TFolder, WorkspaceLeaf } from 'obsidian';
+import { Notice, Plugin, TAbstractFile, TFile, TFolder, WorkspaceLeaf } from 'obsidian';
 import { documentCounts, markdownToTaskPaper } from '@taskpaper/core';
 import { TaskPaperView, VIEW_TYPE_TASKPAPER } from './view';
 import { TaskPaperSidebarView, VIEW_TYPE_SIDEBAR } from './sidebar';
 import { TaskPaperCommands } from './commands';
 import { outlineOf } from './editor/outline';
+import { TaskpaperLinesCache } from './calendarSources';
 import { DEFAULT_SETTINGS, TaskPaperSettings, TaskPaperSettingTab } from './settings';
 
 export default class TaskPaperPlugin extends Plugin {
@@ -13,6 +14,18 @@ export default class TaskPaperPlugin extends Plugin {
   lastActiveView: TaskPaperView | null = null;
   private statusEl: HTMLElement | null = null;
   private refreshTimer: number | null = null;
+  /** Bumps on any .taskpaper content change — the vault-scope calendar's
+   *  render/drag staleness token. */
+  calendarEpoch = 0;
+  /** Closed-file line cache for the vault-wide calendar scope. */
+  private calendarLinesCache = new TaskpaperLinesCache(
+    async (path) => {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      return file instanceof TFile ? this.app.vault.cachedRead(file) : '';
+    },
+    () => this.refreshCalendarsSoon(),
+  );
+  private calendarTimer: number | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -64,6 +77,27 @@ export default class TaskPaperPlugin extends Plugin {
         }
       }),
     );
+    // Vault-scope calendars: any .taskpaper change (or a rename away from
+    // .taskpaper) invalidates the line cache and refreshes active calendars.
+    const calendarVaultEvent = (file: TAbstractFile, oldPath?: string) => {
+      const isTaskpaper =
+        (file instanceof TFile && file.extension === 'taskpaper') ||
+        oldPath?.endsWith('.taskpaper') === true;
+      if (!isTaskpaper) {
+        return;
+      }
+      this.calendarLinesCache.invalidate(file.path);
+      if (oldPath) {
+        this.calendarLinesCache.invalidate(oldPath);
+      }
+      this.calendarEpoch++;
+      this.refreshCalendarsSoon();
+    };
+    this.registerEvent(this.app.vault.on('create', (file) => calendarVaultEvent(file)));
+    this.registerEvent(this.app.vault.on('modify', (file) => calendarVaultEvent(file)));
+    this.registerEvent(this.app.vault.on('delete', (file) => calendarVaultEvent(file)));
+    this.registerEvent(this.app.vault.on('rename', (file, oldPath) => calendarVaultEvent(file, oldPath)));
+
     this.addSettingTab(new TaskPaperSettingTab(this.app, this));
     this.applyBodyClasses();
     this.registerCommands();
@@ -71,6 +105,36 @@ export default class TaskPaperPlugin extends Plugin {
 
   onunload(): void {
     document.body.removeClass('taskpaper-no-strike');
+    if (this.calendarTimer !== null) {
+      window.clearTimeout(this.calendarTimer);
+      this.calendarTimer = null;
+    }
+  }
+
+  /** Any open editor's change makes vault-scope calendar data stale. */
+  bumpCalendarEpoch(): void {
+    this.calendarEpoch++;
+  }
+
+  /** Cached lines of a (closed) file — null while a background read runs. */
+  calendarLines(file: TFile): string[] | null {
+    return this.calendarLinesCache.lines(file.path, `${file.stat.mtime}:${file.stat.size}`);
+  }
+
+  /** Debounced calendar-only refresh for vault file events. */
+  private refreshCalendarsSoon(): void {
+    if (this.calendarTimer !== null) {
+      window.clearTimeout(this.calendarTimer);
+    }
+    this.calendarTimer = window.setTimeout(() => {
+      this.calendarTimer = null;
+      for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_TASKPAPER)) {
+        const view = leaf.view;
+        if (view instanceof TaskPaperView) {
+          view.refreshCalendar();
+        }
+      }
+    }, 500);
   }
 
   activeView(): TaskPaperView | null {

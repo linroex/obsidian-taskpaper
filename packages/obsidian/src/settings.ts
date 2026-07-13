@@ -1,4 +1,5 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
+import type { CalendarScope } from './calendarSources';
 import type { GlobalSearch } from './sidebarLogic';
 import type TaskPaperPlugin from './main';
 
@@ -27,6 +28,8 @@ export interface TaskPaperSettings {
   inboxFile: string;
   /** Project path ('Work/收件匣') Quick Capture inserts under; empty = document end. */
   inboxProject: string;
+  /** Calendar scope: the view's own file, or every .taskpaper file in the vault. */
+  calendarScope: CalendarScope;
 }
 
 export const DEFAULT_SETTINGS: TaskPaperSettings = {
@@ -47,6 +50,7 @@ export const DEFAULT_SETTINGS: TaskPaperSettings = {
   excludeTags: 'search',
   inboxFile: 'Inbox.taskpaper',
   inboxProject: '',
+  calendarScope: 'file',
 };
 
 export class TaskPaperSettingTab extends PluginSettingTab {
@@ -140,6 +144,21 @@ export class TaskPaperSettingTab extends PluginSettingTab {
           .setValue(String(this.plugin.settings.calendarWeekStart))
           .onChange(async (v) => {
             this.plugin.settings.calendarWeekStart = Number(v);
+            await this.plugin.saveSettings();
+            this.plugin.refreshSidebar();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('行事曆：範圍')
+      .setDesc('顯示本檔或 vault 內所有 .taskpaper 檔案的排程項目（行事曆工具列可隨時切換）。')
+      .addDropdown((d) =>
+        d
+          .addOption('file', '本檔')
+          .addOption('vault', '全部')
+          .setValue(this.plugin.settings.calendarScope)
+          .onChange(async (v) => {
+            this.plugin.settings.calendarScope = v === 'vault' ? 'vault' : 'file';
             await this.plugin.saveSettings();
             this.plugin.refreshSidebar();
           }),
