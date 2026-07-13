@@ -142,10 +142,12 @@ export function lex(input: string): Token[] {
       continue;
     }
 
-    // Bareword: run of non-special characters.
+    // Bareword: run of non-special characters. `::` breaks the run so the
+    // spaceless axis form (`parent::project`) lexes as word + coloncolon +
+    // word instead of one word.
     const start = i;
     let word = '';
-    while (i < n && !isBreak(input[i])) {
+    while (i < n && !isBreak(input[i]) && !(input[i] === ':' && input[i + 1] === ':')) {
       word += input[i];
       i++;
     }

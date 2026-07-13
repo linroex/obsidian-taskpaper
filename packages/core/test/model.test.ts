@@ -235,10 +235,14 @@ check('| is or', qa('@today | @due').join(',') === 'a1,a2,open3', qa('@today | @
   // context at the virtual root and fall back to all items.
   check('axis child as first step = roots', ax('child ::project') === '0,8', ax('child ::project'));
   check('axis parent as first step falls back to all items', ax('parent ::project') === '0,3,8', ax('parent ::project'));
-  // PINNED CURRENT BEHAVIOR: without a space before `::` the lexer's bareword
-  // loop swallows the colons (`:` is not a word-break), so `parent::project`
-  // is one text-search term matching nothing — arguably a lexer bug.
-  check('axis without a space is a bare text term (pinned)', ax('//task/parent::project') === '', ax('//task/parent::project'));
+  // The spaceless form is the original app's canonical spelling — the lexer
+  // breaks barewords at `::` so it means the same as the spaced form.
+  check(
+    'axis without a space works (canonical TaskPaper spelling)',
+    ax('//task/parent::project') === ax('//task/parent ::project') && ax('//task/parent::project') !== '',
+    ax('//task/parent::project'),
+  );
+  check('axis ancestor spaceless', ax('//@flag/ancestor::project') === '0,3', ax('//@flag/ancestor::project'));
 }
 
 // --- matches relation (regex) ---
