@@ -100,8 +100,14 @@ export function lex(input: string): Token[] {
       continue;
     }
 
-    // Operators.
+    // Operators. A lone `!` (not followed by `=`) is an alias for `not`;
+    // only `!=` is a real operator.
     if (OP_CHARS.has(c)) {
+      if (c === '!' && input[i + 1] !== '=') {
+        push('word', 'not', i);
+        i++;
+        continue;
+      }
       const start = i;
       let op = c;
       i++;
@@ -109,7 +115,6 @@ export function lex(input: string): Token[] {
         op += '=';
         i++;
       }
-      // Normalize `!` alone to a not-operator handled by parser via word? keep as op.
       push('op', op, start);
       continue;
     }
@@ -133,11 +138,6 @@ export function lex(input: string): Token[] {
     }
     if (c === '|') {
       push('word', 'or', i);
-      i++;
-      continue;
-    }
-    if (c === '!') {
-      push('word', 'not', i);
       i++;
       continue;
     }
