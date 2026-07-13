@@ -65,16 +65,20 @@ export interface CalendarHostContext {
 export function createCalendarHost(ctx: CalendarHostContext): CalendarHost {
   const scope = (): CalendarScope => (ctx.settings.calendarScope === 'vault' ? 'vault' : 'file');
 
+  /** THE open view for a path — always the first match, so aggregation and
+   *  open/reschedule act on the same leaf when a file is open twice. */
+  const openViewFor = (path: string): CalendarViewLike | null =>
+    ctx.openViews().find((v) => v.path === path) ?? null;
+
   /** Vault-scope documents beyond the own file: open views win over disk. */
   const foreignDocs = (): CalendarSourceDoc[] => {
     const ownPath = ctx.own().path;
-    const open = new Map(ctx.openViews().map((v) => [v.path, v]));
     const docs: CalendarSourceDoc[] = [];
     for (const file of ctx.vault.getFiles()) {
       if (file.extension !== 'taskpaper' || file.path === ownPath) {
         continue;
       }
-      const view = open.get(file.path);
+      const view = openViewFor(file.path);
       const lines = view ? docLines(view.state()) : ctx.cachedLines(file);
       if (lines) {
         docs.push({ path: file.path, lines, badge: file.basename });
@@ -154,7 +158,7 @@ export function createCalendarHost(ctx: CalendarHostContext): CalendarHost {
         own.jumpToLine(line);
         return;
       }
-      const view = ctx.openViews().find((v) => v.path === occ.source.path);
+      const view = openViewFor(occ.source.path);
       if (view) {
         jumpInto(view, occ);
         return;
@@ -181,7 +185,7 @@ export function createCalendarHost(ctx: CalendarHostContext): CalendarHost {
         own.setLineText(line, rescheduledLine(doc.line(line + 1).text, occ.role, date));
         return;
       }
-      const view = ctx.openViews().find((v) => v.path === occ.source.path);
+      const view = openViewFor(occ.source.path);
       if (view) {
         const lines = docLines(view.state());
         const where = foreignLine(lines, occ);

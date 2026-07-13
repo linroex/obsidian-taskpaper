@@ -1046,6 +1046,23 @@ async function calendarCacheTests(): Promise<void> {
   cache.invalidate('new.taskpaper');
   check('rename/delete invalidation drops the entries', cache.lines('new.taskpaper', '1:1') === null && reads.length === 4);
   check('the invalidated path is only re-read when asked again', reads[reads.length - 1] === 'new.taskpaper');
+
+  // Invalidation DURING an in-flight read: the old content must not land.
+  let release: (data: string) => void = () => {};
+  const slow = new TaskpaperLinesCache(
+    () => new Promise<string>((resolve) => (release = resolve)),
+    () => {
+      loaded++;
+    },
+  );
+  check('the slow read is pending', slow.lines('g.taskpaper', '1:1') === null);
+  slow.invalidate('g.taskpaper'); // file replaced while the read is in flight
+  release('OLD CONTENT');
+  await tick();
+  check(
+    'an invalidated in-flight read never repopulates the cache',
+    slow.lines('g.taskpaper', '1:1') === null,
+  );
 }
 
 void calendarCacheTests().then(

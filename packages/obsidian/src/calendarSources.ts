@@ -165,6 +165,9 @@ export function sourcedCalendarModel(
 export class TaskpaperLinesCache {
   private entries = new Map<string, { key: string; lines: string[] }>();
   private pending = new Set<string>();
+  /** Bumped by invalidate/clear so an in-flight read of the OLD content can't
+   *  repopulate the cache after the file changed underneath it. */
+  private generation = new Map<string, number>();
 
   constructor(
     private read: (path: string) => Promise<string>,
@@ -178,9 +181,13 @@ export class TaskpaperLinesCache {
     }
     if (!this.pending.has(path)) {
       this.pending.add(path);
+      const gen = this.generation.get(path) ?? 0;
       this.read(path).then(
         (data) => {
           this.pending.delete(path);
+          if ((this.generation.get(path) ?? 0) !== gen) {
+            return; // invalidated mid-read — the content may be stale
+          }
           this.entries.set(path, { key, lines: data.split('\n') });
           this.onLoaded();
         },
@@ -195,9 +202,16 @@ export class TaskpaperLinesCache {
   /** Drop one path (vault modify/delete, and both ends of a rename). */
   invalidate(path: string): void {
     this.entries.delete(path);
+    this.generation.set(path, (this.generation.get(path) ?? 0) + 1);
   }
 
   clear(): void {
     this.entries.clear();
+    for (const [path, gen] of this.generation) {
+      this.generation.set(path, gen + 1);
+    }
+    for (const path of this.pending) {
+      this.generation.set(path, (this.generation.get(path) ?? 0) + 1);
+    }
   }
 }
