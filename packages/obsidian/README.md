@@ -45,6 +45,19 @@ Project:
 - **Outline editing**: move an item + its subtree with `Alt+↑/↓`, indent/outdent with
   `Alt+Shift+→/←`.
 - **Status bar**: shows today / overdue / remaining task counts for the active file.
+- **Links**: bare URLs, `[label](url)` markdown links, and `[[wikilinks]]` (with
+  `[[Note|alias]]` / `[[Note#heading]]`) render live-preview style — syntax hides until the
+  cursor touches it. Unresolved wikilinks are dimmed; clicking them never creates a note.
+- **Calendar view** (in-tab toggle): month grid + agenda of `@due` / `@today` items with
+  drag-to-reschedule, and a 「本檔 | 全部」scope switch that aggregates every `.taskpaper`
+  file in the vault (foreign items carry a file badge; clicking opens the file at the line).
+- **Quick capture** (「快速新增任務」, works anywhere in Obsidian): one-line modal that
+  appends a task to your inbox file — `@due(tomorrow)`-style dates resolve as you type,
+  the inbox file/project is configurable and auto-created.
+- **Tag drag-to-assign**: drag an item's handle onto a sidebar tag value row to set
+  `@tag(value)` on it (a tag name row adds the bare tag) — reclassify a reading list by
+  dragging books between `@想看` / `@想買` values without touching the text.
+- **Recurring tasks**: `@repeat(1w)` and friends — see 重複任務 below.
 
 ## Query language
 
@@ -109,6 +122,10 @@ Enable **TaskPaper** under Settings → Community plugins, then open any `.taskp
 | Archive project name | `Archive` | Project that Archive Done Items collects into |
 | Strike through done items | on | Dim + strike completed items |
 | Filter hides non-matching lines | on | Hide (vs. dim) non-matches when filtering |
+| 行事曆：每週起始日 | 週一 | Calendar weeks start Monday or Sunday |
+| 行事曆：顯示週數 | on | `W627`-style ISO week labels in the month grid |
+| 行事曆：範圍 | 本檔 | Calendar aggregates the current file or every `.taskpaper` file |
+| 快速新增：收件匣檔案 / 目標專案 | `Inbox.taskpaper` | Where 快速新增任務 appends captured tasks |
 
 ## License
 
