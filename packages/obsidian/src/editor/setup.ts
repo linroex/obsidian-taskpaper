@@ -124,17 +124,20 @@ export function createEditorExtensions(host: EditorHost): Extension[] {
           return true;
         },
       },
-      { key: 'Alt-ArrowUp', preventDefault: true, run: (v) => applyOutlineOp(v, moveItemUp) },
-      { key: 'Alt-ArrowDown', preventDefault: true, run: (v) => applyOutlineOp(v, moveItemDown) },
+      // Always consume these keys: when the branch legitimately can't move
+      // (no sibling in that direction), falling through to defaultKeymap's
+      // single-LINE move would tear the item away from its subtree.
+      { key: 'Alt-ArrowUp', preventDefault: true, run: (v) => (applyOutlineOp(v, moveItemUp), true) },
+      { key: 'Alt-ArrowDown', preventDefault: true, run: (v) => (applyOutlineOp(v, moveItemDown), true) },
       {
         key: 'Alt-Shift-ArrowRight',
         preventDefault: true,
-        run: (v) => applyOutlineOp(v, indentItem),
+        run: (v) => (applyOutlineOp(v, indentItem), true),
       },
       {
         key: 'Alt-Shift-ArrowLeft',
         preventDefault: true,
-        run: (v) => applyOutlineOp(v, outdentItem),
+        run: (v) => (applyOutlineOp(v, outdentItem), true),
       },
       ...taskpaperKeymap,
       ...searchKeymap,

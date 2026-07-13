@@ -317,14 +317,14 @@ const DOC = [
   press(view, 'ArrowDown', { alt: true });
   check('alt-down at the bottom is a no-op', docText(view) === doc, JSON.stringify(docText(view)));
 
-  // PINNED current behavior: when the outline op finds no sibling (A: is the
-  // only root), the key FALLS THROUGH to defaultKeymap's moveLineDown, which
-  // moves the single line — the branch is left behind.
+  // With no sibling in that direction (A: is the only root) the key is
+  // consumed as a no-op — falling through to defaultKeymap's moveLineDown
+  // would move the single LINE and tear the project away from its subtree.
   view.dispatch({ selection: { anchor: 0 } });
   press(view, 'ArrowDown', { alt: true });
   check(
-    'alt-down with no next sibling falls through to a single-line move (pinned)',
-    docText(view) === ['\t- a1', 'A:', '\t\t- a2', '\t- a3'].join('\n'),
+    'alt-down with no next sibling is a no-op, never a single-line move',
+    docText(view) === doc,
     JSON.stringify(docText(view)),
   );
   cleanup();
