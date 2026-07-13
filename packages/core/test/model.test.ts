@@ -182,6 +182,94 @@ check('@id equality', qa('@id = 1').join(',') === 'a1', qa('@id = 1').join(','))
 check('@id numeric compare', qa('@id <[n] 3').join(',') === 'Inbox,a1,a2', qa('@id <[n] 3').join(','));
 check('@id present on all items', qa('@id').length === adv.items.length, String(qa('@id').length));
 
+// --- `!` / `&` / `|` aliases for not / and / or ---
+check('! negates like not', qa('!@done').join(',') === qa('not @done').join(','), qa('!@done').join(','));
+check(
+  '! exact matched set',
+  qa('!@done').join(',') === 'Inbox,Work,a1,a2,a3,child of done,grandchild of done,open,open2',
+  qa('!@done').join(','),
+);
+check(
+  '! before a parenthesized group',
+  qa('!(@today or @done)').join(',') === qa('not (@today or @done)').join(','),
+  qa('!(@today or @done)').join(','),
+);
+check('!= still lexes as one operator', qa('@priority != 1').join(',') === 'open,open2', qa('@priority != 1').join(','));
+check('& is and', qa('@today & @done').join(',') === 'open3', qa('@today & @done').join(','));
+check('| is or', qa('@today | @due').join(',') === 'a1,a2,open3', qa('@today | @due').join(','));
+
+// --- explicit axes (`axis ::predicate` steps) against a nested fixture ---
+{
+  // line: 0 Alpha / 1 a1 / 2 note / 3 Beta / 4 b1 / 5 b2 / 6 b3 / 7 a2 / 8 Gamma / 9 g1
+  const axDoc = [
+    'Alpha:',
+    '\t- a1',
+    '\t\tnote under a1',
+    '\tBeta:',
+    '\t\t- b1 @done',
+    '\t\t- b2',
+    '\t\t- b3 @flag',
+    '\t- a2',
+    'Gamma:',
+    '\t- g1',
+  ];
+  const axo = buildOutline(axDoc, 4);
+  const ax = (query: string) =>
+    [...runQuery(query, axo)]
+      .map((i) => i.line)
+      .sort((x, y) => x - y)
+      .join(',');
+
+  check('axis parent', ax('//task/parent ::project') === '0,3,8', ax('//task/parent ::project'));
+  check('axis parent of a root is empty', ax('//project "Alpha"/parent ::*') === '', ax('//project "Alpha"/parent ::*'));
+  check('axis ancestor', ax('//@flag/ancestor ::project') === '0,3', ax('//@flag/ancestor ::project'));
+  check('axis ancestor-or-self', ax('//@flag/ancestor-or-self ::*') === '0,3,6', ax('//@flag/ancestor-or-self ::*'));
+  check('axis following-sibling', ax('//project "Beta"/following-sibling ::task') === '7', ax('//project "Beta"/following-sibling ::task'));
+  check('axis preceding-sibling', ax('//@flag/preceding-sibling ::*') === '4,5', ax('//@flag/preceding-sibling ::*'));
+  check('axis self keeps a matching item', ax('//@done/self ::task') === '4', ax('//@done/self ::task'));
+  check('axis self drops a non-matching item', ax('//@done/self ::project') === '', ax('//@done/self ::project'));
+  check('axis child with tag predicate', ax('//project "Beta"/child ::@done') === '4', ax('//project "Beta"/child ::@done'));
+  check('axis descendant', ax('//project "Alpha"/descendant ::task') === '1,4,5,6,7', ax('//project "Alpha"/descendant ::task'));
+  check('axis descendant-or-self', ax('//project "Beta"/descendant-or-self ::*') === '3,4,5,6', ax('//project "Beta"/descendant-or-self ::*'));
+  // First-step axes: `child ::` starts from the roots; other axes have no
+  // context at the virtual root and fall back to all items.
+  check('axis child as first step = roots', ax('child ::project') === '0,8', ax('child ::project'));
+  check('axis parent as first step falls back to all items', ax('parent ::project') === '0,3,8', ax('parent ::project'));
+  // PINNED CURRENT BEHAVIOR: without a space before `::` the lexer's bareword
+  // loop swallows the colons (`:` is not a word-break), so `parent::project`
+  // is one text-search term matching nothing — arguably a lexer bug.
+  check('axis without a space is a bare text term (pinned)', ax('//task/parent::project') === '', ax('//task/parent::project'));
+}
+
+// --- matches relation (regex) ---
+check('matches is case-insensitive by default', q('@text matches "^buy"').length === 1, q('@text matches "^buy"').join(' | '));
+check('matches anchored regex hits', q('@text matches "^Buy"').length === 1, q('@text matches "^Buy"').join(' | '));
+check('matches[s] is case-sensitive', q('@text matches[s] "^buy"').length === 0, q('@text matches[s] "^buy"').join(' | '));
+check('matches[s] with the right case still hits', q('@text matches[s] "^Buy"').length === 1);
+check('invalid regex evaluates false, never throws', q('@text matches "["').length === 0, q('@text matches "["').join(' | '));
+
+// --- relations / modifiers / attributes: !=, >=[n], [s], @line, @level ---
+check(
+  '@type != project',
+  qa('@type != project').join(',') === 'a1,a2,a3,child of done,done parent,grandchild of done,open,open2,open3',
+  qa('@type != project').join(','),
+);
+// parseFloat('1,2') is 1, so the multi-value item fails the >= 2 boundary.
+check('>=[n] numeric boundary', qa('@priority >=[n] 2').join(',') === 'open2', qa('@priority >=[n] 2').join(','));
+check('contains[s] case-sensitive miss', q('@text contains[s] "buy"').length === 0, q('@text contains[s] "buy"').join(' | '));
+check('contains default is case-insensitive', q('@text contains "buy"').length === 1);
+check('line attribute is 1-based', qa('line = 2').join(',') === 'a1', qa('line = 2').join(','));
+check('@level compares tree depth', qa('@level > 1').join(',') === 'child of done,grandchild of done', qa('@level > 1').join(','));
+{
+  let threw = '';
+  try {
+    runQuery('@x = "abc', adv);
+  } catch (e) {
+    threw = String(e);
+  }
+  check('unterminated string throws from the lexer', threw.includes('Unterminated string'), threw);
+}
+
 // --- markdown → taskpaper conversion (file-menu 轉換) ---
 {
   const md = [
@@ -222,6 +310,23 @@ check('@id present on all items', qa('@id').length === adv.items.length, String(
   const fenced = markdownToTaskPaper(['```', '# install deps', '- run npm i', '```', '# Real heading']);
   check('fence content is never rewritten', fenced[1] === '# install deps' && fenced[2] === '- run npm i', JSON.stringify(fenced));
   check('lines after the fence convert again', fenced[4] === 'Real heading:', fenced[4]);
+
+  // `+` bullets normalize like `*` and `-`.
+  check('plus items normalize to dashes', markdownToTaskPaper(['+ item'])[0] === '- item', markdownToTaskPaper(['+ item'])[0]);
+  // `~~~` toggles fencing exactly like ``` — content passes through untouched.
+  const tilde = markdownToTaskPaper(['~~~', '# x', '- y', '~~~', '# real']);
+  check('~~~ fence content passes through', tilde[1] === '# x' && tilde[2] === '- y', JSON.stringify(tilde));
+  check('~~~ fence closes again', tilde[4] === 'real:', tilde[4]);
+  // A document whose space indents are all multiples of 4 detects step 4.
+  const four = markdownToTaskPaper(['- a', '    - b', '        - c']);
+  check('uniformly-4-space doc uses step 4', four.join('|') === '- a|\t- b|\t\t- c', JSON.stringify(four));
+  // Space-indented list lines inside a fence never influence step detection.
+  const fencedIndent = markdownToTaskPaper(['```', '  - fake', '```', '- a', '    - b']);
+  check(
+    'fenced list lines are excluded from step detection',
+    fencedIndent.join('|') === '```|  - fake|```|- a|\t- b',
+    JSON.stringify(fencedIndent),
+  );
 }
 
 // --- selectedRootLines: covering fallback is opt-in ---
@@ -256,6 +361,10 @@ check(
 );
 check('hasTag', hasTag('- foo @today', 'today') && !hasTag('- foo @today', 'done'));
 check('todayStamp format', /^\d{4}-\d{2}-\d{2}$/.test(todayStamp(false)));
+// Fixed clock: exact stamps, including zero-padding of month/day/hour/minute.
+check('todayStamp fixed date', todayStamp(false, new Date(2026, 0, 5, 9, 7)) === '2026-01-05', todayStamp(false, new Date(2026, 0, 5, 9, 7)));
+check('todayStamp with time zero-pads', todayStamp(true, new Date(2026, 0, 5, 9, 7)) === '2026-01-05 09:07', todayStamp(true, new Date(2026, 0, 5, 9, 7)));
+check('todayStamp with time late in the day', todayStamp(true, new Date(2026, 11, 31, 23, 59)) === '2026-12-31 23:59', todayStamp(true, new Date(2026, 11, 31, 23, 59)));
 check('escaped parens in value', (() => {
   const l = buildOutline(['- x @note(a \\) b)'], 4);
   return l.items[0].tags.get('note') === 'a ) b';
@@ -318,6 +427,30 @@ check('weekday + time', iso('next friday 8:30am') === '2026-07-10 08:30', String
 check('bad hour 13pm -> null', iso('13pm') === null);
 check('bad minutes 9:75 -> null', iso('9:75') === null);
 check('time ts is local', parseDate('16:15', ref) === new Date(2026, 6, 9, 16, 15).getTime());
+
+// ISO time validity: seconds parse (but drop from the ISO string), `T`
+// separates like a space, and out-of-range components reject as a whole.
+check('iso seconds parse but drop from string', iso('2026-07-08 14:30:45') === '2026-07-08 14:30', String(iso('2026-07-08 14:30:45')));
+check('iso seconds survive in the timestamp', parseDate('2026-07-08 14:30:45', ref) === new Date(2026, 6, 8, 14, 30, 45).getTime());
+check('iso T separator', iso('2026-07-08T14:30') === '2026-07-08 14:30', String(iso('2026-07-08T14:30')));
+check('iso hour overflow 25:00 -> null', iso('2026-07-08 25:00') === null, String(iso('2026-07-08 25:00')));
+check('iso minute overflow 14:61 -> null', iso('2026-07-08 14:61') === null, String(iso('2026-07-08 14:61')));
+check('iso second overflow 14:30:61 -> null', iso('2026-07-08 14:30:61') === null, String(iso('2026-07-08 14:30:61')));
+
+// Weekday abbreviations and this/next/last arithmetic (ref = Thu 2026-07-09).
+check('nl next fri (abbr)', iso('next fri') === '2026-07-10', String(iso('next fri')));
+check('nl tues (bare abbr)', iso('tues') === '2026-07-14', String(iso('tues')));
+check('nl weds (bare abbr)', iso('weds') === '2026-07-15', String(iso('weds')));
+check('nl thurs same weekday skips to next', iso('thurs') === '2026-07-16', String(iso('thurs')));
+check('nl this wed is the nearest (past)', iso('this wed') === '2026-07-08', String(iso('this wed')));
+check('nl this fri is the nearest (ahead)', iso('this fri') === '2026-07-10', String(iso('this fri')));
+check('nl last fri', iso('last fri') === '2026-07-03', String(iso('last fri')));
+check('nl next week = now + 7 days', iso('next week') === '2026-07-16', String(iso('next week')));
+check('nl this week = today', iso('this week') === '2026-07-09', String(iso('this week')));
+check('nl last week = now - 7 days', iso('last week') === '2026-07-02', String(iso('last week')));
+check('nl last month = previous month start', iso('last month') === '2026-06-01', String(iso('last month')));
+check('nl this month = month start', iso('this month') === '2026-07-01', String(iso('this month')));
+check('nl this year = jan 1', iso('this year') === '2026-01-01', String(iso('this year')));
 
 // Month names — full and 3-letter, with next/last/this and optional day.
 check('month bare = this year', iso('june') === '2026-06-01', String(iso('june')));
@@ -684,6 +817,28 @@ check('projectStats Work remaining', !!workStat && workStat.total === 4 && workS
 const dc = documentCounts(outline);
 check('documentCounts today=3', dc.today === 3, JSON.stringify(dc));
 check('documentCounts done=3', dc.done === 3, JSON.stringify(dc));
+
+// overdue / dueToday with a fixed clock (Thu 2026-07-09) — drives the status bar.
+{
+  const dcNow = new Date(2026, 6, 9);
+  const dcOutline = buildOutline(
+    [
+      'P:',
+      '\t- past @due(2026-07-08)',
+      '\t- today @due(2026-07-09)',
+      '\t- future @due(2026-07-10)',
+      '\t- plain',
+      '\t- weird @due(banana)',
+      '\t- finished @due(2026-07-01) @done(2026-07-02)',
+    ],
+    4,
+  );
+  const c = documentCounts(dcOutline, dcNow);
+  check('documentCounts overdue = strictly before today', c.overdue === 1, JSON.stringify(c));
+  check('documentCounts dueToday = due exactly today', c.dueToday === 1, JSON.stringify(c));
+  check('documentCounts remaining counts all open tasks', c.remaining === 5, JSON.stringify(c));
+  check('documentCounts a done past-due is only done', c.done === 1, JSON.stringify(c));
+}
 const searchDoc = buildOutline(['Searches:', '\t- Hot @search(@today and not @done)'], 4);
 const ss = savedSearches(searchDoc);
 check('savedSearches parses', ss.length === 1 && ss[0].name === 'Hot' && ss[0].query === '@today and not @done', JSON.stringify(ss));
