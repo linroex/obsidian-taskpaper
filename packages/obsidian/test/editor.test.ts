@@ -98,6 +98,54 @@ function setEq(a: Set<number>, b: Set<number>): boolean {
   check('match keeps its note chain, not others', setEq(hiddenLines(s), new Set([5, 6])), [...hiddenLines(s)].join(','));
 }
 
+// --- query filter recomputes on document EDIT (filterDecoField docChanged branch) ---
+{
+  const doc = ['Inbox:', '\t- a @today', '\t- b @today'].join('\n');
+  const base = EditorState.create({ doc, extensions: [filterExtension] });
+  const s = base.update({
+    effects: setFilterEffect.of({ mode: 'query', query: '@today', hide: true }),
+  }).state;
+  check('both tagged lines visible before the edit', hiddenLines(s).size === 0, [...hiddenLines(s)].join(','));
+
+  // Delete " @today" from line 2 — the query filter recomputes and hides it.
+  const line2 = s.doc.line(2);
+  const edited = s.update({ changes: { from: line2.to - ' @today'.length, to: line2.to } }).state;
+  check('deleting @today hides that line on recompute', setEq(hiddenLines(edited), new Set([2])), [...hiddenLines(edited)].join(','));
+
+  // Typing the tag back unhides the line again.
+  const restored = edited.update({ changes: { from: edited.doc.line(2).to, insert: ' @today' } }).state;
+  check('typing @today back unhides the line', hiddenLines(restored).size === 0, [...hiddenLines(restored)].join(','));
+
+  // Removing the LAST match leaves an empty visible set — every line hides
+  // (current behavior: an empty result hides the whole document).
+  const l2 = restored.doc.line(2);
+  const l3 = restored.doc.line(3);
+  const none = restored.update({
+    changes: [
+      { from: l2.to - ' @today'.length, to: l2.to },
+      { from: l3.to - ' @today'.length, to: l3.to },
+    ],
+  }).state;
+  check('removing every match hides all lines', setEq(hiddenLines(none), new Set([1, 2, 3])), [...hiddenLines(none)].join(','));
+}
+
+// --- mid-document hidden runs flush as SEPARATE block decorations ---
+{
+  const doc = ['- a', '- b @today', '- c'].join('\n');
+  const base = EditorState.create({ doc, extensions: [filterExtension] });
+  const s = base.update({
+    effects: setFilterEffect.of({ mode: 'query', query: '@today', hide: true }),
+  }).state;
+  check('lines around the match hide', setEq(hiddenLines(s), new Set([1, 3])), [...hiddenLines(s)].join(','));
+  const spans: string[] = [];
+  s.field(filterDecoField).between(0, s.doc.length, (from, to) => {
+    spans.push(`${from}-${to}`);
+  });
+  // Line 1 hides with its trailing newline (0-4); line 3, at the document
+  // end, hides to its own end (15-18) — TWO blocks, not one.
+  check('interrupted runs flush as two blocks', spans.join(',') === '0-4,15-18', spans.join(','));
+}
+
 // --- focus filter: only Inbox's subtree (lines 1-3) visible; 4,5 hidden ---
 {
   const s = withFilter({ mode: 'focus', visible: new Set([0, 1, 2]), hide: true });
@@ -910,6 +958,28 @@ check('adjacent identity drop is a no-op', planFreeDrag(DRAG_DOC, 2, 1, true, 4)
     plan !== null && plan.lines.join('|') === '|B:|A:|\t- a1',
     JSON.stringify(plan?.lines),
   );
+}
+{
+  // Dropping below the last item clamps to it (after=true) instead of vanishing.
+  const BLANK_END = ['A:', '\t- a1', 'B:', ''];
+  // The trailing blank line belongs to B's subtree — hovering it (lower half)
+  // drops after B; the blank line stays put, the branch lands past it.
+  const plan = planFreeDrag(BLANK_END, 1, 3, true, 4);
+  check(
+    'hover on the trailing blank drops after the last item, re-indented',
+    plan !== null && plan.lines.join('|') === 'A:|B:||- a1' && plan.indicatorLine === 4,
+    JSON.stringify(plan),
+  );
+  // A hover PAST every item (targetLine beyond the document) clamps to the
+  // last item with after=true — even when the caller asked for "before".
+  const clamped = planFreeDrag(BLANK_END, 1, 99, false, 4);
+  check(
+    'hover past the end clamps to the last item, after=true',
+    clamped !== null && clamped.lines.join('|') === 'A:|B:||- a1' && clamped.indicatorLine === 4,
+    JSON.stringify(clamped),
+  );
+  // Dragging FROM a blank line resolves to no item — a null plan.
+  check('dragging a blank line yields no plan', planFreeDrag(BLANK_END, 3, 0, false, 4) === null);
 }
 
 // --- collapse/expand all by level (original Shift-Cmd-9 / Shift-Cmd-0) ---

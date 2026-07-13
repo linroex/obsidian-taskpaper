@@ -235,6 +235,122 @@ const DOC = [
   cleanup();
 }
 
+// --- Enter/Alt-Enter non-happy branches: selections and non-task lines ---
+{
+  // A non-empty selection on a task line falls PAST the continue-task binding
+  // to the default newline: the selection is replaced, no '- ' marker added.
+  const { view, cleanup } = mountEditor('\t- alpha beta');
+  view.dispatch({ selection: { anchor: 3, head: 8 } }); // "alpha" selected
+  press(view, 'Enter');
+  check(
+    'enter with a selection replaces it without a new marker',
+    docText(view) === '\t- \n\tbeta',
+    JSON.stringify(docText(view)),
+  );
+  check('cursor lands after the kept indent', view.state.selection.main.head === 5);
+  cleanup();
+}
+{
+  // Enter at the end of a project line is a plain newline — no continuation.
+  const { view, cleanup } = mountEditor('Work:\n\t- a');
+  view.dispatch({ selection: { anchor: 5 } }); // end of "Work:"
+  press(view, 'Enter');
+  check(
+    'enter on a project line inserts a plain newline',
+    docText(view) === 'Work:\n\n\t- a',
+    JSON.stringify(docText(view)),
+  );
+  cleanup();
+}
+{
+  // On an INDENTED project line the new line keeps the indentation.
+  const { view, cleanup } = mountEditor('A:\n\tSub:\n\t- x');
+  view.dispatch({ selection: { anchor: view.state.doc.line(2).to } });
+  press(view, 'Enter');
+  check(
+    'enter on an indented project keeps the indent, adds no marker',
+    docText(view) === 'A:\n\tSub:\n\t\n\t- x',
+    JSON.stringify(docText(view)),
+  );
+  cleanup();
+}
+{
+  // Alt-Enter with a selection replaces it with newline + current indent.
+  const { view, cleanup } = mountEditor('\t- alpha beta');
+  view.dispatch({ selection: { anchor: 3, head: 9 } }); // "alpha " selected
+  press(view, 'Enter', { alt: true });
+  check(
+    'alt-enter with a selection replaces it with newline + indent',
+    docText(view) === '\t- \n\tbeta',
+    JSON.stringify(docText(view)),
+  );
+  check('alt-enter cursor sits after the inserted indent', view.state.selection.main.head === 5);
+  cleanup();
+}
+
+// --- Alt-Arrow / Alt-Shift-Arrow move + indent the WHOLE branch ---
+{
+  const doc = ['A:', '\t- a1', '\t\t- a2', '\t- a3'].join('\n');
+  const { view, cleanup } = mountEditor(doc);
+  view.dispatch({ selection: { anchor: view.state.doc.line(2).from + 3 } }); // on a1
+
+  check('alt-down is handled', press(view, 'ArrowDown', { alt: true }));
+  check(
+    'alt-down moves a1 AND its child below a3',
+    docText(view) === ['A:', '\t- a3', '\t- a1', '\t\t- a2'].join('\n'),
+    JSON.stringify(docText(view)),
+  );
+  check(
+    'the cursor follows the moved branch',
+    view.state.doc.lineAt(view.state.selection.main.head).number === 3,
+    String(view.state.doc.lineAt(view.state.selection.main.head).number),
+  );
+
+  press(view, 'ArrowUp', { alt: true });
+  check('alt-up moves the branch back', docText(view) === doc, JSON.stringify(docText(view)));
+
+  // Edge no-ops: at the document's very top and bottom nothing changes.
+  view.dispatch({ selection: { anchor: 0 } }); // on A: (first root, first line)
+  press(view, 'ArrowUp', { alt: true });
+  check('alt-up at the top is a no-op', docText(view) === doc, JSON.stringify(docText(view)));
+  view.dispatch({ selection: { anchor: view.state.doc.line(4).from } }); // a3: last sibling, last line
+  press(view, 'ArrowDown', { alt: true });
+  check('alt-down at the bottom is a no-op', docText(view) === doc, JSON.stringify(docText(view)));
+
+  // PINNED current behavior: when the outline op finds no sibling (A: is the
+  // only root), the key FALLS THROUGH to defaultKeymap's moveLineDown, which
+  // moves the single line — the branch is left behind.
+  view.dispatch({ selection: { anchor: 0 } });
+  press(view, 'ArrowDown', { alt: true });
+  check(
+    'alt-down with no next sibling falls through to a single-line move (pinned)',
+    docText(view) === ['\t- a1', 'A:', '\t\t- a2', '\t- a3'].join('\n'),
+    JSON.stringify(docText(view)),
+  );
+  cleanup();
+}
+{
+  // Alt-Shift-Right indents the whole branch; Alt-Shift-Left undoes it.
+  const doc = ['A:', '\t- a1', '\t\t- a2', '\t- a3'].join('\n');
+  const { view, cleanup } = mountEditor(doc);
+  view.dispatch({ selection: { anchor: view.state.doc.line(2).from + 3 } }); // on a1
+  check('alt-shift-right is handled', press(view, 'ArrowRight', { alt: true, shift: true }));
+  check(
+    'alt-shift-right indents a1 and its child one level',
+    docText(view) === ['A:', '\t\t- a1', '\t\t\t- a2', '\t- a3'].join('\n'),
+    JSON.stringify(docText(view)),
+  );
+  press(view, 'ArrowLeft', { alt: true, shift: true });
+  check('alt-shift-left outdents the branch back', docText(view) === doc, JSON.stringify(docText(view)));
+
+  // Outdenting a line already at the margin never touches the document
+  // (the key falls through to a selection command, not an edit).
+  view.dispatch({ selection: { anchor: 0 } });
+  press(view, 'ArrowLeft', { alt: true, shift: true });
+  check('alt-shift-left at the margin leaves the document alone', docText(view) === doc, JSON.stringify(docText(view)));
+  cleanup();
+}
+
 // --- clicking a link opens it through the host ---
 {
   const { view, host, cleanup } = mountEditor('- read https://example.com/spec');
