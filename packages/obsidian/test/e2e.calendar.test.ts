@@ -598,13 +598,10 @@ function settingsAndBoundaryTests(): void {
       jan[0] === 'W653',
       jan[0],
     );
-    // PINS CURRENT (BUGGY) BEHAVIOR: Mon 2027-01-04 is ISO week 1 of 2027
-    // (week 1 always contains Jan 4), so this should read W701. isoWeekLabel
-    // (core calendar.ts) is off by +1 for ISO week-years whose Jan 1 falls on
-    // Fri/Sat/Sun: it counts weeks from `3 - jan1MondayOffset` even when that
-    // goes negative instead of from the year's FIRST Thursday. Fix the
-    // formula, then flip this expectation to W701.
-    check('the next row rolls over to ISO week-year 2027 (pinned: W702, should be W701)', jan[1] === 'W702', jan[1]);
+    // Mon 2027-01-04 is ISO week 1 of 2027 (week 1 always contains Jan 4) —
+    // a regression here means isoWeekLabel drifted off the first-Thursday
+    // rule for years whose Jan 1 falls on Fri/Sat/Sun.
+    check('the next row rolls over to W701', jan[1] === 'W701', jan[1]);
     fx.cleanup();
   }
 }

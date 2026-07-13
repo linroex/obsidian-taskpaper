@@ -201,6 +201,10 @@ export function isoWeekLabel(date: string): string {
   const thursday = new Date(y, m - 1, d - ((day.getDay() + 6) % 7) + 3);
   const weekYear = thursday.getFullYear();
   const jan1 = new Date(weekYear, 0, 1);
-  const week = 1 + Math.round(((thursday.getTime() - jan1.getTime()) / 86400000 - 3 + ((jan1.getDay() + 6) % 7)) / 7);
+  // The week's Thursday always lies inside the ISO week-year, so the week
+  // number is just which 7-day slice of that year the Thursday falls in
+  // (the first Thursday has ordinal 1..7 → week 1).
+  const ordinal = Math.round((thursday.getTime() - jan1.getTime()) / 86400000) + 1;
+  const week = Math.ceil(ordinal / 7);
   return `W${weekYear % 10}${String(week).padStart(2, '0')}`;
 }
