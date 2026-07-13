@@ -11,7 +11,7 @@
  *    vault copy stays untouched (unsaved-editor race avoided)
  *  - Escape cancels without writing anything
  */
-import { docText, mountEditor } from './e2eHarness';
+import { clickEl, docText, hiddenLineNumbers, mountEditor } from './e2eHarness';
 import { App, Notice, TFile, Vault, WorkspaceLeaf } from 'obsidian';
 import { resolveDateExpression } from '@taskpaper/core';
 import { TaskPaperCommands } from '../src/commands';
@@ -239,6 +239,93 @@ async function main(): Promise<void> {
     check('blank input does not submit', captureInput() !== null);
     check('blank input writes nothing', vault.contents.size === 0);
     pressKey('Escape');
+  }
+
+  // --- capture into an open editor while a hide-filter is active ---
+  // PINS CURRENT BEHAVIOR (not a spec): the query filter recomputes on the
+  // capture edit, so a captured task that does not match the active filter is
+  // immediately hidden by it. If this is ever deemed surprising (captured
+  // tasks "disappearing"), the fix belongs in the capture path, not here.
+  {
+    const { plugin, app, vault } = pluginWith({
+      inboxFile: 'Inbox.taskpaper',
+      inboxProject: 'Inbox',
+    });
+    await vault.create('Inbox.taskpaper', 'stale');
+    const { view, cleanup } = mountEditor('Inbox:\n\t- a @today\n\t- b');
+    const tpView = Object.create(TaskPaperView.prototype) as TaskPaperView;
+    tpView.file = new TFile('Inbox.taskpaper', 'Inbox', 'taskpaper');
+    tpView.editor = view;
+    const leaf = new WorkspaceLeaf();
+    leaf.view = tpView;
+    app.workspace.leaves.push(leaf);
+
+    // Activate the @today hide-filter by clicking the rendered tag.
+    clickEl(view.dom.querySelector<HTMLElement>('.tp-tag[data-tag="today"]')!);
+    check(
+      'the @today filter hides the non-matching line before capture',
+      hiddenLineNumbers(view).size === 1 && hiddenLineNumbers(view).has(3),
+      [...hiddenLineNumbers(view)].join(','),
+    );
+
+    const commands = new TaskPaperCommands(plugin);
+    await commands.captureToInbox('Inbox.taskpaper', 'Inbox', '- c');
+    await settle();
+    check(
+      'the captured task lands as the last child of the project',
+      docText(view) === 'Inbox:\n\t- a @today\n\t- b\n\t- c',
+      JSON.stringify(docText(view)),
+    );
+    check(
+      'PIN: the live filter recomputes and hides the non-matching captured line',
+      hiddenLineNumbers(view).has(4) && hiddenLineNumbers(view).has(3) && !hiddenLineNumbers(view).has(2),
+      [...hiddenLineNumbers(view)].join(','),
+    );
+    cleanup();
+  }
+
+  // --- inbox path collisions: existing folder / parent segment is a file ---
+  {
+    const { plugin, vault } = pluginWith({ inboxFile: 'Inbox.taskpaper' });
+    await vault.createFolder('Inbox.taskpaper'); // the inbox path IS a folder
+    vault.createdFolders.length = 0;
+    const commands = new TaskPaperCommands(plugin);
+    const notices = Notice.messages.length;
+    await commands.captureToInbox('Inbox.taskpaper', '', '- x');
+    await settle();
+    check(
+      'an inbox path that is a folder raises the folder notice',
+      Notice.messages.slice(notices).includes('無法寫入 Inbox.taskpaper：該路徑是資料夾'),
+      Notice.messages.slice(notices).join(' / '),
+    );
+    check(
+      'nothing is written or created',
+      vault.contents.size === 0 && vault.created.length === 0 && vault.createdFolders.length === 0,
+    );
+    check(
+      'no success notice appears',
+      !Notice.messages.slice(notices).some((m) => m.startsWith('已加入')),
+    );
+  }
+  {
+    const { plugin, vault } = pluginWith({ inboxFile: 'GTD/Inbox.taskpaper' });
+    await vault.create('GTD', 'i am a file'); // the parent segment is a FILE
+    vault.created.length = 0;
+    const commands = new TaskPaperCommands(plugin);
+    const notices = Notice.messages.length;
+    await commands.captureToInbox('GTD/Inbox.taskpaper', '', '- x');
+    await settle();
+    check(
+      'a file blocking a parent folder raises the segment notice',
+      Notice.messages.slice(notices).includes('無法建立 GTD/Inbox.taskpaper：GTD 已是檔案'),
+      Notice.messages.slice(notices).join(' / '),
+    );
+    check(
+      'the blocking file is untouched and no inbox is created',
+      vault.contents.get('GTD') === 'i am a file' &&
+        vault.created.length === 0 &&
+        !vault.contents.has('GTD/Inbox.taskpaper'),
+    );
   }
 }
 

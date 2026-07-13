@@ -62,13 +62,19 @@ function editorAdapter(path: string, view: EditorView, jumps?: number[]): Calend
   };
 }
 
+/** Optional fixture knobs: settings overrides and an openFileView stand-in. */
+interface MountCalendarOpts {
+  settings?: Partial<typeof DEFAULT_SETTINGS>;
+  openFileView?: (path: string) => Promise<CalendarViewLike | null>;
+}
+
 /** Mount a real editor + the real calendar pane behind the real host. */
-function mountCalendar(doc: string) {
+function mountCalendar(doc: string, opts: MountCalendarOpts = {}) {
   const mounted = mountEditor(doc);
   const root = document.body.createDiv();
   const jumps: number[] = [];
   const app = new App();
-  const settings = { ...DEFAULT_SETTINGS, globalSearches: [] };
+  const settings = { ...DEFAULT_SETTINGS, globalSearches: [], ...opts.settings };
   const saved: string[] = [];
   /** Foreign TaskPaper views tests register (unsaved edits must win). */
   const extraOpen: CalendarViewLike[] = [];
@@ -83,7 +89,7 @@ function mountCalendar(doc: string) {
       vault: app.vault,
       own: () => own,
       openViews: () => [own, ...extraOpen],
-      openFileView: async () => null,
+      openFileView: opts.openFileView ?? (async () => null),
       cachedLines: (file) => cache.lines(file.path, `${file.stat.mtime}:${file.stat.size}`),
       settings,
       saveSettings: () => {
@@ -517,13 +523,208 @@ async function vaultScopeTests(): Promise<void> {
   }
 }
 
-void vaultScopeTests().then(
-  () => {
-    console.log(`\n${pass} passed, ${fail} failed`);
-    process.exit(fail === 0 ? 0 : 1);
-  },
-  (err) => {
-    console.error(err);
-    process.exit(1);
-  },
-);
+// ---------------------------------------------------------------------------
+// Week-start / week-number settings + ISO year boundary
+// ---------------------------------------------------------------------------
+
+function weekLabelsOf(root: HTMLElement): string[] {
+  return Array.from(root.querySelectorAll('.tp-cal-weeknum')).map((el) => el.textContent ?? '');
+}
+
+function settingsAndBoundaryTests(): void {
+  // --- weekStart 0 (Sunday): grid layout + the Monday-lookup ISO week labels ---
+  {
+    const fx = mountCalendar(DOC, { settings: { calendarWeekStart: 0 } });
+    check(
+      'Sunday start: the first weekday header is 日',
+      fx.root.querySelector('.tp-cal-weekday:not(.tp-cal-weeknum-head)')?.textContent === '日',
+      fx.root.querySelector('.tp-cal-weekday:not(.tp-cal-weeknum-head)')?.textContent ?? '(none)',
+    );
+    const cells = Array.from(fx.root.querySelectorAll<HTMLElement>('.tp-cal-day'));
+    check('Sunday start: July 2026 still fits 5 rows of 7', cells.length === 35, String(cells.length));
+    check(
+      'Sunday start: the grid begins on Sunday 2026-06-28',
+      cells[0]?.getAttribute('data-date') === '2026-06-28',
+      cells[0]?.getAttribute('data-date') ?? '(none)',
+    );
+    // Every Sunday-start row is labeled by ITS Monday: the row beginning on
+    // Sunday 2026-07-12 (ISO week 28) carries W629 — Monday 2026-07-13's week.
+    check(
+      'Sunday start: rows are ISO-labeled via the Monday lookup',
+      weekLabelsOf(fx.root).join(',') === 'W627,W628,W629,W630,W631',
+      weekLabelsOf(fx.root).join(','),
+    );
+    check(
+      "today's row (starting Sunday the 12th) is labeled by its Monday",
+      weekLabelsOf(fx.root)[2] === 'W629',
+      weekLabelsOf(fx.root)[2],
+    );
+    check('the today highlight still lands on the 12th', fx.cell('2026-07-12')!.classList.contains('is-today'));
+    fx.cleanup();
+  }
+
+  // --- showWeekNumbers: false renders no week column at all ---
+  {
+    const fx = mountCalendar(DOC, { settings: { calendarShowWeekNumbers: false } });
+    const grid = fx.root.querySelector('.tp-cal-grid');
+    check('the grid drops the week-number modifier class', grid !== null && !grid.classList.contains('tp-cal-grid-weeks'));
+    check('no week labels are rendered', weekLabelsOf(fx.root).length === 0, weekLabelsOf(fx.root).join(','));
+    check('no week-number header cell either', fx.root.querySelector('.tp-cal-weeknum-head') === null);
+    check(
+      'exactly 7 weekday headers remain',
+      fx.root.querySelectorAll('.tp-cal-weekday').length === 7,
+      String(fx.root.querySelectorAll('.tp-cal-weekday').length),
+    );
+    fx.cleanup();
+  }
+
+  // --- ISO year boundary: 2026 has 53 weeks; January rolls over to W701 ---
+  {
+    const fx = mountCalendar(DOC);
+    for (let i = 0; i < 5; i++) {
+      fx.button('tp-cal-next')!.click(); // July -> December 2026
+    }
+    check('navigated to December 2026', fx.root.textContent!.includes('2026年12月'));
+    const dec = weekLabelsOf(fx.root);
+    check(
+      'December rows run W649..W653 (2026 is a 53-week ISO year)',
+      dec.join(',') === 'W649,W650,W651,W652,W653',
+      dec.join(','),
+    );
+    fx.button('tp-cal-next')!.click(); // -> January 2027
+    const jan = weekLabelsOf(fx.root);
+    check(
+      "January 2027's first row (Mon 2026-12-28) still belongs to ISO 2026",
+      jan[0] === 'W653',
+      jan[0],
+    );
+    // PINS CURRENT (BUGGY) BEHAVIOR: Mon 2027-01-04 is ISO week 1 of 2027
+    // (week 1 always contains Jan 4), so this should read W701. isoWeekLabel
+    // (core calendar.ts) is off by +1 for ISO week-years whose Jan 1 falls on
+    // Fri/Sat/Sun: it counts weeks from `3 - jan1MondayOffset` even when that
+    // goes negative instead of from the year's FIRST Thursday. Fix the
+    // formula, then flip this expectation to W701.
+    check('the next row rolls over to ISO week-year 2027 (pinned: W702, should be W701)', jan[1] === 'W702', jan[1]);
+    fx.cleanup();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Drag-reschedule of completed occurrences; @start placement (pinned)
+// ---------------------------------------------------------------------------
+
+function completedAndStartDragTests(): void {
+  const doc = [
+    '- fin @due(2026-07-05) @done(2026-07-08)',
+    '- withstart @start(2026-07-13) @due(2026-07-16)',
+    '- startonly @start(2026-07-14)',
+  ].join('\n');
+  const fx = mountCalendar(doc);
+
+  // PIN: @start alone places nothing on the calendar (CalendarRole has no
+  // 'start'; @start only matters combined with @due — the due date shows).
+  check(
+    'PIN: an @start-only task produces no occurrence',
+    !fx.occs().some((o) => textOf(o) === 'startonly') && fx.occs(fx.cell('2026-07-14')!).length === 0,
+  );
+  check('a done task never shows on its @due date', fx.occs(fx.cell('2026-07-05')!).length === 0);
+  check('@start+@due shows once, on the due date', fx.occs(fx.cell('2026-07-16')!).map(textOf).join(',') === 'withstart');
+
+  fx.button('tp-cal-done-toggle')!.click();
+  check(
+    '顯示已完成 reveals the completed occurrence on its @done date',
+    fx.occs(fx.cell('2026-07-08')!).map(textOf).join(',') === 'fin',
+  );
+
+  dragTo(fx, 'fin', '2026-07-20');
+  check(
+    'dragging a completed occurrence moves @done and leaves @due untouched',
+    docText(fx.editor).split('\n')[0] === '- fin @due(2026-07-05) @done(2026-07-20)',
+    docText(fx.editor).split('\n')[0],
+  );
+  check(
+    'the completed occurrence re-renders on the new @done date',
+    fx.occs(fx.cell('2026-07-20')!).map(textOf).join(',') === 'fin',
+  );
+
+  dragTo(fx, 'withstart', '2026-07-18');
+  check(
+    'dragging an @start+@due occurrence rewrites @due and leaves @start alone',
+    docText(fx.editor).split('\n')[1] === '- withstart @start(2026-07-13) @due(2026-07-18)',
+    docText(fx.editor).split('\n')[1],
+  );
+  fx.cleanup();
+}
+
+// ---------------------------------------------------------------------------
+// Vault scope: clicking an occurrence from a CLOSED foreign file
+// ---------------------------------------------------------------------------
+
+async function closedForeignClickTests(): Promise<void> {
+  // --- openFileView resolves: the file is opened and the line jumped to ---
+  {
+    const foreign = mountEditor('- foreign task @due(2026-07-15)');
+    const foreignJumps: number[] = [];
+    const openedPaths: string[] = [];
+    const fx = mountCalendar(DOC, {
+      openFileView: async (path) => {
+        openedPaths.push(path);
+        return editorAdapter(path, foreign.view, foreignJumps);
+      },
+    });
+    await fx.vault.create('other.taskpaper', '- foreign task @due(2026-07-15)\n');
+    fx.scopeButton('全部')!.click();
+    await settle();
+
+    const occ = fx.occs(fx.cell('2026-07-15')!).find((o) => textOf(o) === 'foreign task')!;
+    occ.click();
+    await settle();
+    check('clicking a closed foreign occurrence opens its file', openedPaths.join(',') === 'other.taskpaper', openedPaths.join(','));
+    check('…and jumps to the re-located line in the opened view', foreignJumps.join(',') === '0', foreignJumps.join(','));
+    check(
+      "the opened view's cursor moved to that line",
+      foreign.view.state.selection.main.head === 0,
+      String(foreign.view.state.selection.main.head),
+    );
+    foreign.cleanup();
+    fx.cleanup();
+  }
+
+  // --- openFileView yields null: the failure Notice, nothing else ---
+  {
+    const fx = mountCalendar(DOC); // default openFileView resolves null
+    await fx.vault.create('other.taskpaper', '- foreign task @due(2026-07-15)\n');
+    fx.scopeButton('全部')!.click();
+    await settle();
+
+    const notices = Notice.messages.length;
+    const before = fx.editor.state.selection.main.head;
+    const occ = fx.occs(fx.cell('2026-07-15')!).find((o) => textOf(o) === 'foreign task')!;
+    occ.click();
+    await settle();
+    check(
+      'a file that cannot be opened raises 無法開啟 <path>',
+      Notice.messages.slice(notices).includes('無法開啟 other.taskpaper'),
+      Notice.messages.slice(notices).join(' / '),
+    );
+    check('the own editor selection is untouched', fx.editor.state.selection.main.head === before);
+    fx.cleanup();
+  }
+}
+
+void vaultScopeTests()
+  .then(() => {
+    settingsAndBoundaryTests();
+    completedAndStartDragTests();
+    return closedForeignClickTests();
+  })
+  .then(
+    () => {
+      console.log(`\n${pass} passed, ${fail} failed`);
+      process.exit(fail === 0 ? 0 : 1);
+    },
+    (err) => {
+      console.error(err);
+      process.exit(1);
+    },
+  );
