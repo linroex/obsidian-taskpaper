@@ -1,7 +1,7 @@
 import { EditorState } from '@codemirror/state';
 import { EditorView, KeyBinding } from '@codemirror/view';
 import { lineKind } from '@taskpaper/core';
-import { isFilterActive } from './filter';
+import { filterSpecField, isFilterActive, revealNewTaskEffect } from './filter';
 import { OUTLINE_TAB_SIZE } from './outline';
 
 /**
@@ -39,9 +39,13 @@ const continueTask: KeyBinding = {
     }
 
     const insert = `\n${indent}- `;
+    const filter = state.field(filterSpecField, false);
     view.dispatch({
       changes: { from: sel.head, insert },
       selection: { anchor: sel.head + insert.length },
+      // A blank task does not match a query yet. Keep its new line rendered
+      // until the cursor leaves so typing can continue under an active filter.
+      effects: filter?.mode === 'query' ? revealNewTaskEffect.of(sel.head + 1) : undefined,
       scrollIntoView: true,
     });
     return true;

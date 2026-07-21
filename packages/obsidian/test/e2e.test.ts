@@ -27,7 +27,7 @@ import { foldedRanges } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
 import { advanceDate, todayStamp } from '@taskpaper/core';
 import { App, Menu, Notice, setIcon, TFile } from 'obsidian';
-import { filterSpecField } from '../src/editor/filter';
+import { filterSpecField, setFilterEffect } from '../src/editor/filter';
 import { refreshLinks } from '../src/editor/links';
 
 let pass = 0;
@@ -225,6 +225,42 @@ const DOC = [
   );
 
   // Enter on an emptied task ends the list (marker cleared).
+  cleanup();
+}
+
+// --- Enter can create and edit a task while a query filter is active ---
+{
+  const { view, cleanup } = mountEditor('Inbox:\n\t- alpha @today\n\t- hidden');
+  view.dispatch({
+    effects: setFilterEffect.of({ mode: 'query', query: '@today', hide: true }),
+    selection: { anchor: view.state.doc.line(2).to },
+  });
+
+  press(view, 'Enter');
+  check(
+    'filtered Enter creates a task on the next line',
+    view.state.doc.line(3).text === '\t- ',
+    JSON.stringify(docText(view)),
+  );
+  check(
+    'new filtered task stays visible while the cursor is on it',
+    !hiddenLineNumbers(view).has(3),
+    [...hiddenLineNumbers(view)].join(','),
+  );
+
+  type(view, 'beta');
+  check(
+    'typing into the new filtered task keeps it visible',
+    view.state.doc.line(3).text === '\t- beta' && !hiddenLineNumbers(view).has(3),
+    JSON.stringify(docText(view)),
+  );
+
+  view.dispatch({ selection: { anchor: view.state.doc.line(2).to } });
+  check(
+    'an unfinished non-match hides after the cursor leaves',
+    hiddenLineNumbers(view).has(3),
+    [...hiddenLineNumbers(view)].join(','),
+  );
   cleanup();
 }
 {

@@ -22,6 +22,12 @@ export type FilterSpec =
 export const setFilterEffect = StateEffect.define<FilterSpec | null>();
 
 /**
+ * Temporarily keep one newly-created task visible while it is being edited.
+ * The value is a document offset on the new line, in the post-change document.
+ */
+export const revealNewTaskEffect = StateEffect.define<number>();
+
+/**
  * What the searchbar should display for the active filter: the query text,
  * a readable `project "Name"` for line-based focus (`project "Name"//*` when
  * the project is hoisted — only its contents shown), or null when no filter
@@ -62,6 +68,38 @@ export const filterSpecField = StateField.define<FilterSpec | null>({
   },
 });
 
+/**
+ * Query filters normally hide a blank task immediately because it cannot match
+ * yet. Remember its line until the cursor leaves so the user can finish typing
+ * the task (and, usually, the tag that makes it match the active query).
+ */
+const revealedTaskField = StateField.define<number | null>({
+  create() {
+    return null;
+  },
+  update(value, tr) {
+    let next = value === null ? null : tr.changes.mapPos(value, -1);
+
+    for (const e of tr.effects) {
+      if (e.is(setFilterEffect)) {
+        next = null;
+      }
+      if (e.is(revealNewTaskEffect)) {
+        next = e.value;
+      }
+    }
+
+    const spec = tr.state.field(filterSpecField);
+    if (next === null || !spec || spec.mode !== 'query') {
+      return null;
+    }
+
+    const pos = Math.min(next, tr.state.doc.length);
+    const cursorLine = tr.state.doc.lineAt(tr.state.selection.main.head).number;
+    return tr.state.doc.lineAt(pos).number === cursorLine ? pos : null;
+  },
+});
+
 /** Decorations that hide/dim non-matching lines; recomputed on filter or edit. */
 export const filterDecoField = StateField.define<DecorationSet>({
   create() {
@@ -69,8 +107,10 @@ export const filterDecoField = StateField.define<DecorationSet>({
   },
   update(deco, tr) {
     const hadEffect = tr.effects.some((e) => e.is(setFilterEffect));
+    const revealedTaskChanged =
+      tr.startState.field(revealedTaskField) !== tr.state.field(revealedTaskField);
     const spec = tr.state.field(filterSpecField);
-    if (hadEffect) {
+    if (hadEffect || revealedTaskChanged) {
       return spec ? buildFilterDeco(tr.state, spec) : Decoration.none;
     }
     // Query filters recompute on edit; focus filters keep their positions (mapped).
@@ -82,8 +122,8 @@ export const filterDecoField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 });
 
-/** The two fields, in dependency order (spec before deco). */
-export const filterExtension = [filterSpecField, filterDecoField];
+/** The fields, in dependency order (spec and temporary reveal before deco). */
+export const filterExtension = [filterSpecField, revealedTaskField, filterDecoField];
 
 export function isFilterActive(state: EditorState): boolean {
   return state.field(filterSpecField, false) != null;
@@ -92,7 +132,7 @@ export function isFilterActive(state: EditorState): boolean {
 function buildFilterDeco(state: EditorState, spec: FilterSpec): DecorationSet {
   let visible: Set<number>;
   if (spec.mode === 'focus') {
-    visible = spec.visible;
+    visible = new Set(spec.visible);
   } else {
     try {
       const matches = runQuery(spec.query, outlineOf(state));
@@ -109,6 +149,11 @@ function buildFilterDeco(state: EditorState, spec: FilterSpec): DecorationSet {
     } catch {
       return Decoration.none;
     }
+  }
+
+  const revealedTask = state.field(revealedTaskField);
+  if (revealedTask !== null) {
+    visible.add(state.doc.lineAt(Math.min(revealedTask, state.doc.length)).number - 1);
   }
 
   const builder = new RangeSetBuilder<Decoration>();
