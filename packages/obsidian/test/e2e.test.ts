@@ -30,6 +30,7 @@ import { App, Menu, Notice, setIcon, TFile } from 'obsidian';
 import * as Obsidian from 'obsidian';
 import { filterSpecField, setFilterEffect } from '../src/editor/filter';
 import { refreshLinks } from '../src/editor/links';
+import { outlineKeyBindings } from '../src/editor/setup';
 import {
   DEFAULT_SETTINGS,
   localizedDefaultSearches,
@@ -583,15 +584,28 @@ function renderedLines(view: EditorView): HTMLElement[] {
   cleanup();
 }
 
-// --- Alt-Arrow / Alt-Shift-Arrow move + indent the WHOLE branch ---
+// --- platform-aware shortcuts move + indent the WHOLE branch ---
+{
+  const bindings = new Map(outlineKeyBindings.map((binding) => [binding.key, binding.mac]));
+  check(
+    'Windows/Linux move shortcuts avoid Alt+Arrow',
+    bindings.get('Mod-Shift-ArrowUp') === 'Alt-ArrowUp' &&
+      bindings.get('Mod-Shift-ArrowDown') === 'Alt-ArrowDown',
+  );
+  check(
+    'Windows/Linux indent shortcuts avoid Alt+Arrow while Mac keeps Option',
+    bindings.get('Mod-Shift-ArrowRight') === 'Alt-Shift-ArrowRight' &&
+      bindings.get('Mod-Shift-ArrowLeft') === 'Alt-Shift-ArrowLeft',
+  );
+}
 {
   const doc = ['A:', '\t- a1', '\t\t- a2', '\t- a3'].join('\n');
   const { view, cleanup } = mountEditor(doc);
   view.dispatch({ selection: { anchor: view.state.doc.line(2).from + 3 } }); // on a1
 
-  check('alt-down is handled', press(view, 'ArrowDown', { alt: true }));
+  check('ctrl-shift-down is handled on Windows/Linux', press(view, 'ArrowDown', { ctrl: true, shift: true }));
   check(
-    'alt-down moves a1 AND its child below a3',
+    'ctrl-shift-down moves a1 AND its child below a3',
     docText(view) === ['A:', '\t- a3', '\t- a1', '\t\t- a2'].join('\n'),
     JSON.stringify(docText(view)),
   );
@@ -601,48 +615,48 @@ function renderedLines(view: EditorView): HTMLElement[] {
     String(view.state.doc.lineAt(view.state.selection.main.head).number),
   );
 
-  press(view, 'ArrowUp', { alt: true });
-  check('alt-up moves the branch back', docText(view) === doc, JSON.stringify(docText(view)));
+  press(view, 'ArrowUp', { ctrl: true, shift: true });
+  check('ctrl-shift-up moves the branch back', docText(view) === doc, JSON.stringify(docText(view)));
 
   // Edge no-ops: at the document's very top and bottom nothing changes.
   view.dispatch({ selection: { anchor: 0 } }); // on A: (first root, first line)
-  press(view, 'ArrowUp', { alt: true });
-  check('alt-up at the top is a no-op', docText(view) === doc, JSON.stringify(docText(view)));
+  press(view, 'ArrowUp', { ctrl: true, shift: true });
+  check('ctrl-shift-up at the top is a no-op', docText(view) === doc, JSON.stringify(docText(view)));
   view.dispatch({ selection: { anchor: view.state.doc.line(4).from } }); // a3: last sibling, last line
-  press(view, 'ArrowDown', { alt: true });
-  check('alt-down at the bottom is a no-op', docText(view) === doc, JSON.stringify(docText(view)));
+  press(view, 'ArrowDown', { ctrl: true, shift: true });
+  check('ctrl-shift-down at the bottom is a no-op', docText(view) === doc, JSON.stringify(docText(view)));
 
   // With no sibling in that direction (A: is the only root) the key is
   // consumed as a no-op — falling through to defaultKeymap's moveLineDown
   // would move the single LINE and tear the project away from its subtree.
   view.dispatch({ selection: { anchor: 0 } });
-  press(view, 'ArrowDown', { alt: true });
+  press(view, 'ArrowDown', { ctrl: true, shift: true });
   check(
-    'alt-down with no next sibling is a no-op, never a single-line move',
+    'ctrl-shift-down with no next sibling is a no-op, never a single-line move',
     docText(view) === doc,
     JSON.stringify(docText(view)),
   );
   cleanup();
 }
 {
-  // Alt-Shift-Right indents the whole branch; Alt-Shift-Left undoes it.
+  // Ctrl-Shift-Right indents the whole branch; Ctrl-Shift-Left undoes it.
   const doc = ['A:', '\t- a1', '\t\t- a2', '\t- a3'].join('\n');
   const { view, cleanup } = mountEditor(doc);
   view.dispatch({ selection: { anchor: view.state.doc.line(2).from + 3 } }); // on a1
-  check('alt-shift-right is handled', press(view, 'ArrowRight', { alt: true, shift: true }));
+  check('ctrl-shift-right is handled', press(view, 'ArrowRight', { ctrl: true, shift: true }));
   check(
-    'alt-shift-right indents a1 and its child one level',
+    'ctrl-shift-right indents a1 and its child one level',
     docText(view) === ['A:', '\t\t- a1', '\t\t\t- a2', '\t- a3'].join('\n'),
     JSON.stringify(docText(view)),
   );
-  press(view, 'ArrowLeft', { alt: true, shift: true });
-  check('alt-shift-left outdents the branch back', docText(view) === doc, JSON.stringify(docText(view)));
+  press(view, 'ArrowLeft', { ctrl: true, shift: true });
+  check('ctrl-shift-left outdents the branch back', docText(view) === doc, JSON.stringify(docText(view)));
 
   // Outdenting a line already at the margin never touches the document
   // (the key falls through to a selection command, not an edit).
   view.dispatch({ selection: { anchor: 0 } });
-  press(view, 'ArrowLeft', { alt: true, shift: true });
-  check('alt-shift-left at the margin leaves the document alone', docText(view) === doc, JSON.stringify(docText(view)));
+  press(view, 'ArrowLeft', { ctrl: true, shift: true });
+  check('ctrl-shift-left at the margin leaves the document alone', docText(view) === doc, JSON.stringify(docText(view)));
   cleanup();
 }
 

@@ -43,8 +43,10 @@ Project:
   project; it then appears in the sidebar.
 - **Natural-language dates**: `@at` / `@due` / query dates accept `today`, `tomorrow`, `next friday`,
   `+1 week`, `3 days`, weekday names — resolved to real dates (e.g. `@due <= "next friday" [d]`).
-- **Outline editing**: move an item + its subtree with `Alt+↑/↓`, indent/outdent with
-  `Alt+Shift+→/←`.
+- **Outline editing**: move an item + its subtree with `Option+↑/↓` on macOS or
+  `Ctrl+Shift+↑/↓` on Windows/Linux. Indent/outdent with `Option+Shift+→/←` on macOS
+  or `Ctrl+Shift+→/←` on Windows/Linux. All four actions are also configurable in
+  Obsidian's Hotkeys settings.
 - **Status bar**: shows today / overdue / remaining task counts for the active file.
 - **Links**: bare URLs, `[label](url)` markdown links, and `[[wikilinks]]` (with
   `[[Note|alias]]` / `[[Note#heading]]`) render live-preview style — syntax hides until the

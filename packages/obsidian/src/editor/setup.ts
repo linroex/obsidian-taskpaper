@@ -1,5 +1,5 @@
 import { EditorState, Extension } from '@codemirror/state';
-import { drawSelection, EditorView, keymap } from '@codemirror/view';
+import { drawSelection, EditorView, keymap, type KeyBinding } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { codeFolding, indentUnit } from '@codemirror/language';
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
@@ -50,6 +50,39 @@ export interface EditorHost {
    *  jsdom's document.elementFromPoint always returns null). */
   elementFromPoint?(x: number, y: number): Element | null;
 }
+
+/**
+ * Outline shortcuts are platform-aware. Alt/Option + arrows is conventional
+ * on macOS, but Windows reserves Alt + arrows for system/navigation actions.
+ * CodeMirror's `mac` override keeps the existing Mac bindings while `Mod`
+ * resolves to Ctrl on Windows and Linux.
+ */
+export const outlineKeyBindings: KeyBinding[] = [
+  {
+    key: 'Mod-Shift-ArrowUp',
+    mac: 'Alt-ArrowUp',
+    preventDefault: true,
+    run: (view) => (applyOutlineOp(view, moveItemUp), true),
+  },
+  {
+    key: 'Mod-Shift-ArrowDown',
+    mac: 'Alt-ArrowDown',
+    preventDefault: true,
+    run: (view) => (applyOutlineOp(view, moveItemDown), true),
+  },
+  {
+    key: 'Mod-Shift-ArrowRight',
+    mac: 'Alt-Shift-ArrowRight',
+    preventDefault: true,
+    run: (view) => (applyOutlineOp(view, indentItem), true),
+  },
+  {
+    key: 'Mod-Shift-ArrowLeft',
+    mac: 'Alt-Shift-ArrowLeft',
+    preventDefault: true,
+    run: (view) => (applyOutlineOp(view, outdentItem), true),
+  },
+];
 
 /**
  * The production CodeMirror extension stack for a TaskPaper editor, exactly
@@ -127,18 +160,7 @@ export function createEditorExtensions(host: EditorHost): Extension[] {
       // Always consume these keys: when the branch legitimately can't move
       // (no sibling in that direction), falling through to defaultKeymap's
       // single-LINE move would tear the item away from its subtree.
-      { key: 'Alt-ArrowUp', preventDefault: true, run: (v) => (applyOutlineOp(v, moveItemUp), true) },
-      { key: 'Alt-ArrowDown', preventDefault: true, run: (v) => (applyOutlineOp(v, moveItemDown), true) },
-      {
-        key: 'Alt-Shift-ArrowRight',
-        preventDefault: true,
-        run: (v) => (applyOutlineOp(v, indentItem), true),
-      },
-      {
-        key: 'Alt-Shift-ArrowLeft',
-        preventDefault: true,
-        run: (v) => (applyOutlineOp(v, outdentItem), true),
-      },
+      ...outlineKeyBindings,
       ...taskpaperKeymap,
       ...searchKeymap,
       indentWithTab,
