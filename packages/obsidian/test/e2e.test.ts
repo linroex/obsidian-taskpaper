@@ -263,6 +263,125 @@ const DOC = [
   );
   cleanup();
 }
+
+// --- Enter also creates a visible task inside a project-focus filter ---
+{
+  const { view, cleanup } = mountEditor(
+    ['Inbox:', '\t- alpha', 'Work:', '\t- hidden'].join('\n'),
+  );
+  view.dispatch({
+    effects: setFilterEffect.of({ mode: 'focus', visible: new Set([0, 1]), hide: true }),
+    selection: { anchor: view.state.doc.line(2).to },
+  });
+
+  press(view, 'Enter');
+  check(
+    'focus-filter Enter creates a new task in the visible project',
+    view.state.doc.line(3).text === '\t- ' && !hiddenLineNumbers(view).has(3),
+    JSON.stringify(docText(view)),
+  );
+  check(
+    'focus-filter insertion keeps the outside project hidden',
+    hiddenLineNumbers(view).has(4) && hiddenLineNumbers(view).has(5),
+    [...hiddenLineNumbers(view)].join(','),
+  );
+  cleanup();
+}
+
+// --- Enter at the end of a task with children appends a direct sub-task ---
+{
+  const { view, cleanup } = mountEditor(
+    ['Inbox:', '\t- parent @today', '\t\t- existing child', '\t- sibling'].join('\n'),
+  );
+  view.dispatch({
+    effects: setFilterEffect.of({ mode: 'query', query: '@today', hide: true }),
+    selection: { anchor: view.state.doc.line(2).to },
+  });
+
+  press(view, 'Enter');
+  check(
+    'enter on a parent appends after its existing subtree',
+    docText(view) ===
+      ['Inbox:', '\t- parent @today', '\t\t- existing child', '\t\t- ', '\t- sibling'].join('\n'),
+    JSON.stringify(docText(view)),
+  );
+  check(
+    'the appended task uses the direct-child indentation',
+    view.state.doc.line(4).text === '\t\t- ',
+    JSON.stringify(view.state.doc.line(4).text),
+  );
+  check(
+    'the appended sub-task remains visible in the active filter',
+    !hiddenLineNumbers(view).has(4),
+    [...hiddenLineNumbers(view)].join(','),
+  );
+  check(
+    'cursor lands after the appended sub-task marker',
+    view.state.selection.main.head === view.state.doc.line(4).to,
+  );
+  type(view, 'new child');
+  check(
+    'the appended sub-task remains editable under the active filter',
+    view.state.doc.line(4).text === '\t\t- new child' && !hiddenLineNumbers(view).has(4),
+    JSON.stringify(view.state.doc.line(4).text),
+  );
+  view.dispatch({ selection: { anchor: view.state.doc.line(2).to } });
+  check(
+    'sub-task stays visible after the temporary reveal ends because its parent matches',
+    !hiddenLineNumbers(view).has(4),
+    [...hiddenLineNumbers(view)].join(','),
+  );
+  cleanup();
+}
+
+// --- appended sub-task is only temporary when the parent is context, not a match ---
+{
+  const { view, cleanup } = mountEditor(
+    ['Inbox:', '\t- parent', '\t\t- matching child @today', '\t- outside'].join('\n'),
+  );
+  view.dispatch({
+    effects: setFilterEffect.of({ mode: 'query', query: '@today', hide: true }),
+    selection: { anchor: view.state.doc.line(2).to },
+  });
+
+  press(view, 'Enter');
+  check(
+    'new child of a context-only parent is visible while editing',
+    view.state.doc.line(4).text === '\t\t- ' && !hiddenLineNumbers(view).has(4),
+    [...hiddenLineNumbers(view)].join(','),
+  );
+
+  view.dispatch({ selection: { anchor: view.state.doc.line(3).to } });
+  check(
+    'non-matching child hides after leaving it when only its sibling matches',
+    hiddenLineNumbers(view).has(4),
+    [...hiddenLineNumbers(view)].join(','),
+  );
+  cleanup();
+}
+
+// --- append after nested descendants, before separators, preserving spaces ---
+{
+  const { view, cleanup } = mountEditor(
+    ['- parent', '  - child', '    - grandchild', '', '- sibling'].join('\n'),
+  );
+  view.dispatch({ selection: { anchor: view.state.doc.line(1).to } });
+
+  press(view, 'Enter');
+  check(
+    'parent Enter appends after every nested descendant and before the blank separator',
+    docText(view) ===
+      ['- parent', '  - child', '    - grandchild', '  - ', '', '- sibling'].join('\n'),
+    JSON.stringify(docText(view)),
+  );
+  check(
+    'new child preserves the existing space indentation',
+    view.state.doc.line(4).text === '  - ' &&
+      view.state.selection.main.head === view.state.doc.line(4).to,
+    JSON.stringify(view.state.doc.line(4).text),
+  );
+  cleanup();
+}
 {
   const { view, cleanup } = mountEditor('- alpha\n- ');
   view.dispatch({ selection: { anchor: view.state.doc.length } });

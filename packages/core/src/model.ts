@@ -160,6 +160,21 @@ export function withAncestors(item: Item): Item[] {
   return chain;
 }
 
+/** Walk an item's whole subtree in document order, including the item itself. */
+export function withDescendants(item: Item): Item[] {
+  const out: Item[] = [];
+  const stack: Item[] = [item];
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    out.push(node);
+    // Push in reverse so the iterative walk preserves document order.
+    for (let i = node.children.length - 1; i >= 0; i--) {
+      stack.push(node.children[i]);
+    }
+  }
+  return out;
+}
+
 /**
  * The note chain attached beneath an item: descendant notes reachable through
  * notes only (a note under a NON-matching task inside a matched project stays
@@ -179,4 +194,18 @@ export function attachedNotes(item: Item): Item[] {
     }
   }
   return out;
+}
+
+/**
+ * Items displayed around a query match. Ancestors provide outline context; a
+ * matching task owns its complete subtree, while other item kinds bring only
+ * their attached note chains.
+ */
+export function filterContextItems(item: Item): Item[] {
+  const included = new Set<Item>(withAncestors(item));
+  const contents = item.kind === 'task' ? withDescendants(item) : attachedNotes(item);
+  for (const content of contents) {
+    included.add(content);
+  }
+  return [...included].sort((a, b) => a.line - b.line);
 }

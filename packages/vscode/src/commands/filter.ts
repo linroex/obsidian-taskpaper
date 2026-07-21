@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { attachedNotes, Item, runQuery, withAncestors } from '@taskpaper/core';
+import { filterContextItems, Item, runQuery } from '@taskpaper/core';
 import { getOutline, tabSizeFor } from '../outline';
 import { focusState } from '../providers/focusState';
 import { FilteredViewProvider } from '../filteredView';
@@ -40,15 +40,11 @@ export async function applyFilterQuery(
     return false;
   }
 
-  // In-place dim: keep matches and their ancestors visible.
+  // In-place dim: keep each match and its shared filter context visible.
   const visible = new Set<number>();
   for (const m of matches) {
-    for (const item of withAncestors(m)) {
+    for (const item of filterContextItems(m)) {
       visible.add(item.line);
-    }
-    // A match brings its attached notes along (they belong to the item).
-    for (const n of attachedNotes(m)) {
-      visible.add(n.line);
     }
   }
   focusState.set(editor.document.uri, visible);

@@ -98,6 +98,82 @@ function setEq(a: Set<number>, b: Set<number>): boolean {
   check('match keeps its note chain, not others', setEq(hiddenLines(s), new Set([5, 6])), [...hiddenLines(s)].join(','));
 }
 
+// --- a matching task brings its entire sub-item tree along ---
+{
+  const doc = [
+    'Inbox:',              // 1  ancestor shown
+    '\t- parent @today',   // 2  match
+    '\t\t- child task',    // 3  shown as part of parent
+    '\t\t\tchild note',     // 4  shown as part of child
+    '\t\t\t- grandchild',   // 5  shown at any depth
+    '\t- sibling',         // 6  hidden
+    '\t\tsibling note',    // 7  hidden
+  ].join('\n');
+  const base = EditorState.create({ doc, extensions: [filterExtension] });
+  const s = base.update({
+    effects: setFilterEffect.of({ mode: 'query', query: '@today', hide: true }),
+  }).state;
+  check(
+    'matching task keeps all descendant sub-items, not siblings',
+    setEq(hiddenLines(s), new Set([6, 7])),
+    [...hiddenLines(s)].join(','),
+  );
+}
+
+// --- an ancestor shown as context does not bring the match's sibling branches ---
+{
+  const doc = [
+    'Inbox:',                 // 1  ancestor shown
+    '\t- parent',             // 2  ancestor shown
+    '\t\t- hit @today',       // 3  match
+    '\t\t- sibling child',    // 4  hidden
+    '\t\t\tsibling note',     // 5  hidden
+    '\t- outside',            // 6  hidden
+  ].join('\n');
+  const base = EditorState.create({ doc, extensions: [filterExtension] });
+  const s = base.update({
+    effects: setFilterEffect.of({ mode: 'query', query: '@today', hide: true }),
+  }).state;
+  check(
+    'context ancestors do not expose sibling subtrees',
+    setEq(hiddenLines(s), new Set([4, 5, 6])),
+    [...hiddenLines(s)].join(','),
+  );
+}
+
+// --- editing a parent match recomputes visibility for its whole subtree ---
+{
+  const doc = ['Inbox:', '\t- parent @today', '\t\t- child', '\t- sibling'].join('\n');
+  const base = EditorState.create({ doc, extensions: [filterExtension] });
+  const filtered = base.update({
+    effects: setFilterEffect.of({ mode: 'query', query: '@today', hide: true }),
+  }).state;
+  check(
+    'matching parent initially reveals its child only',
+    setEq(hiddenLines(filtered), new Set([4])),
+    [...hiddenLines(filtered)].join(','),
+  );
+
+  const parent = filtered.doc.line(2);
+  const removed = filtered.update({
+    changes: { from: parent.to - ' @today'.length, to: parent.to },
+  }).state;
+  check(
+    'removing the parent match hides its former subtree',
+    setEq(hiddenLines(removed), new Set([1, 2, 3, 4])),
+    [...hiddenLines(removed)].join(','),
+  );
+
+  const restored = removed.update({
+    changes: { from: removed.doc.line(2).to, insert: ' @today' },
+  }).state;
+  check(
+    'restoring the parent match reveals its subtree again',
+    setEq(hiddenLines(restored), new Set([4])),
+    [...hiddenLines(restored)].join(','),
+  );
+}
+
 // --- query filter recomputes on document EDIT (filterDecoField docChanged branch) ---
 {
   const doc = ['Inbox:', '\t- a @today', '\t- b @today'].join('\n');
@@ -167,6 +243,20 @@ function setEq(a: Set<number>, b: Set<number>): boolean {
     count++;
   });
   check('dim mode decorates non-matching lines', count === 3, `count=${count}`);
+}
+
+// --- dim mode also treats a matching task's descendants as visible context ---
+{
+  const doc = ['Inbox:', '\t- parent @today', '\t\t- child', '\t- sibling'].join('\n');
+  const base = EditorState.create({ doc, extensions: [filterExtension] });
+  const s = base.update({
+    effects: setFilterEffect.of({ mode: 'query', query: '@today', hide: false }),
+  }).state;
+  check(
+    'dim filter leaves matching task descendants undimmed',
+    setEq(hiddenLines(s), new Set([4])),
+    [...hiddenLines(s)].join(','),
+  );
 }
 
 // --- focus survives an edit inside the visible region (decorations mapped, still hiding) ---

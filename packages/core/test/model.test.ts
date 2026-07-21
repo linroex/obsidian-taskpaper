@@ -1,4 +1,4 @@
-import { buildOutline } from '../src/model';
+import { buildOutline, filterContextItems, withDescendants } from '../src/model';
 import { runQuery } from '../src/query/evaluator';
 import { quoteQueryValue } from '../src/query/lexer';
 import { addTag, planAssignTag, removeTag, removeAllTags, hasTag, todayStamp, toggleDoneLine } from '../src/tags';
@@ -78,6 +78,25 @@ check('Work has 2 children', work.children.length === 2, `got ${work.children.le
 const ship = work.children[0];
 check('Ship has 2 subtasks', ship.children.length === 2, `got ${ship.children.length}`);
 check('changelog is done task', ship.children[0].tags.has('done'));
+check(
+  'withDescendants keeps a task and its full subtree in document order',
+  withDescendants(ship).map((item) => item.displayText).join('|') ===
+    'Ship release @due(2026-07-01) @flag|Write changelog @done(2026-07-06)|Tag the build',
+);
+check(
+  'task filter context includes ancestors and the complete task subtree',
+  filterContextItems(ship).map((item) => item.displayText).join('|') ===
+    'Work|Ship release @due(2026-07-01) @flag|Write changelog @done(2026-07-06)|Tag the build',
+);
+check(
+  'child-task filter context excludes its parent task siblings',
+  filterContextItems(ship.children[0]).map((item) => item.displayText).join('|') ===
+    'Work|Ship release @due(2026-07-01) @flag|Write changelog @done(2026-07-06)',
+);
+check(
+  'project filter context does not expand unrelated child-task branches',
+  filterContextItems(work).map((item) => item.displayText).join('|') === 'Work',
+);
 const errands = outline.roots[2].children[0];
 check('Errands nested project', errands.kind === 'project' && errands.displayText === 'Errands');
 check('subtreeEnd of Ship covers subtasks', ship.subtreeEnd >= ship.children[1].line);

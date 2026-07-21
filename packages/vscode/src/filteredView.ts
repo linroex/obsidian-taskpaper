@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { Item, runQuery, withAncestors } from '@taskpaper/core';
+import { filterContextItems, Item, runQuery } from '@taskpaper/core';
 import { getOutline, tabSizeFor } from './outline';
 
 export const FILTER_SCHEME = 'taskpaper-filter';
@@ -63,10 +63,11 @@ export class FilteredViewProvider
       return `# Query error\n${(err as Error).message}`;
     }
 
-    // Include ancestors of every match so hierarchy/context is preserved.
+    // Include ancestors for context. A matching task also brings its complete
+    // subtree; other item kinds retain their attached note chains.
     const include = new Set<Item>();
     for (const m of matches) {
-      for (const item of withAncestors(m)) {
+      for (const item of filterContextItems(m)) {
         include.add(item);
       }
     }

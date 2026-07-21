@@ -1,8 +1,8 @@
 import { EditorState } from '@codemirror/state';
 import { EditorView, KeyBinding } from '@codemirror/view';
-import { lineKind } from '@taskpaper/core';
+import { lineKind, withDescendants } from '@taskpaper/core';
 import { filterSpecField, isFilterActive, revealNewTaskEffect } from './filter';
-import { OUTLINE_TAB_SIZE } from './outline';
+import { outlineOf, OUTLINE_TAB_SIZE } from './outline';
 
 /**
  * Whether Escape should clear the active filter/focus (TaskPaper 3: Escape
@@ -38,14 +38,25 @@ const continueTask: KeyBinding = {
       return true;
     }
 
-    const insert = `\n${indent}- `;
+    // At the end of a task that already has children, append another direct
+    // child after the whole subtree. Inserting a same-level task immediately
+    // below the parent would accidentally re-parent its existing children.
+    const item = outlineOf(state).items.find((candidate) => candidate.line === line.number - 1);
+    const appendChild = sel.head === line.to && item !== undefined && item.children.length > 0;
+    const descendants = appendChild ? withDescendants(item) : [];
+    const lastDescendant = descendants[descendants.length - 1];
+    const insertAt = lastDescendant ? state.doc.line(lastDescendant.line + 1).to : sel.head;
+    const childIndent = appendChild
+      ? (/^[\t ]*/.exec(item.children[0].raw)?.[0] ?? `${indent}\t`)
+      : indent;
+    const insert = `\n${childIndent}- `;
     const filter = state.field(filterSpecField, false);
     view.dispatch({
-      changes: { from: sel.head, insert },
-      selection: { anchor: sel.head + insert.length },
+      changes: { from: insertAt, insert },
+      selection: { anchor: insertAt + insert.length },
       // A blank task does not match a query yet. Keep its new line rendered
       // until the cursor leaves so typing can continue under an active filter.
-      effects: filter?.mode === 'query' ? revealNewTaskEffect.of(sel.head + 1) : undefined,
+      effects: filter?.mode === 'query' ? revealNewTaskEffect.of(insertAt + 1) : undefined,
       scrollIntoView: true,
     });
     return true;
