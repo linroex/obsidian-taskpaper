@@ -27,8 +27,9 @@ Project:
 
 - A dedicated editor view for `.taskpaper` files (not markdown — no collisions with `-` lists
   or `#` headings).
-- **Highlighting**: bold projects, dimmed strikethrough `@done` items, colored tags, and a
-  red highlight for an overdue `@due(date)` on an unfinished task.
+- **Highlighting**: bold projects, colored tags, and a red highlight for an overdue
+  `@due(date)` on an unfinished task. A task with `@done` dims and strikes through its
+  entire subtree, including nested tasks and notes.
 - **Folding** any project or task's subtree.
 - **True inline filter**: run a query and the non-matching lines are genuinely hidden (matches
   and their ancestor projects stay visible). Toggle to "dim instead of hide" in settings.

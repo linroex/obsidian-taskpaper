@@ -15,3 +15,9 @@ separate request.
 - Preserve the vault plugin directory's `data.json` and any other user data.
 - Verify the deployed files match the build artifacts, and report that Obsidian
   needs to reload the plugin/app before testing.
+
+## Git workflow
+
+After each feature or bug fix is complete, tested, built, and deployed when
+applicable, commit it without waiting for the user to verify it manually. Keep
+separate completed features in separate commits.

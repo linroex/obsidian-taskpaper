@@ -177,7 +177,7 @@
   font-style: italic;
 }
 
-/* Done items — dimmed with a strikethrough (toggleable via body class). */
+/* Done task subtrees — dimmed with a strikethrough (toggleable via body class). */
 .tp-done {
   color: var(--text-faint);
   text-decoration: line-through;

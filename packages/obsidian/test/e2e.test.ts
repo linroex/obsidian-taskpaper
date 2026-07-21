@@ -68,6 +68,10 @@ const DOC = [
   '\t- delta @waiting(ann)',
 ].join('\n');
 
+function renderedLines(view: EditorView): HTMLElement[] {
+  return Array.from(view.dom.querySelectorAll<HTMLElement>('.cm-line'));
+}
+
 // --- clicking a task's leading dash toggles @done in the document ---
 {
   const { view, host, cleanup } = mountEditor(DOC);
@@ -91,6 +95,69 @@ const DOC = [
     'clicking again removes @done',
     view.state.doc.line(2).text === '\t- alpha',
     view.state.doc.line(2).text,
+  );
+  cleanup();
+}
+
+// --- a completed task visually owns every nested task and note ---
+{
+  const { view, cleanup } = mountEditor([
+    '- parent',
+    '\t- child @due(2020-01-01)',
+    '\t\tchild note',
+    '\t\t- grandchild',
+    '- sibling',
+    '\tsibling note',
+  ].join('\n'));
+
+  check('unfinished subtree initially has no done styling', findMark(view, 'tp-done').length === 0);
+  check(
+    'unfinished child due date is initially overdue',
+    findMark(view, 'tp-tag-overdue').length === 2,
+  );
+
+  clickEl(findMark(view, 'tp-task-dash')[0]);
+  let lines = renderedLines(view);
+  check(
+    'completing a task styles the parent, nested tasks, and note',
+    lines.slice(0, 4).every((line) => line.classList.contains('tp-done')),
+  );
+  check(
+    'completion styling stops at the next sibling branch',
+    lines.slice(4).every((line) => !line.classList.contains('tp-done')),
+  );
+  check(
+    'an inherited-done note retains its note styling',
+    lines[2].classList.contains('tp-note') && lines[2].classList.contains('tp-done'),
+  );
+  check('dates inside a completed subtree are not marked overdue', findMark(view, 'tp-tag-overdue').length === 0);
+
+  view.dispatch({
+    effects: setFilterEffect.of({ mode: 'query', query: '@done', hide: true }),
+  });
+  check(
+    'done styling survives a filter that displays the completed task subtree',
+    findMark(view, 'tp-done').length === 4 && setEq(hiddenLineNumbers(view), new Set([5, 6])),
+  );
+
+  view.dispatch({ effects: setFilterEffect.of(null) });
+  clickEl(findMark(view, 'tp-handle')[0]);
+  check(
+    'folding a completed task leaves its visible parent styled done',
+    findMark(view, 'tp-done').length === 1 && foldCount(view) === 1,
+  );
+  clickEl(findMark(view, 'tp-handle')[0]);
+  check(
+    'unfolding restores done styling on the whole subtree',
+    findMark(view, 'tp-done').length === 4 && foldCount(view) === 0,
+  );
+
+  clickEl(findMark(view, 'tp-task-dash')[0]);
+  lines = renderedLines(view);
+  check(
+    'uncompleting the parent clears inherited styling and restores overdue state',
+    lines.every((line) => !line.classList.contains('tp-done')) &&
+      findMark(view, 'tp-tag-overdue').length === 2,
   );
   cleanup();
 }

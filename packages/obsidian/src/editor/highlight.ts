@@ -1,11 +1,25 @@
 import { RangeSetBuilder } from '@codemirror/state';
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate } from '@codemirror/view';
-import { isPastDate, parseTags } from '@taskpaper/core';
+import { isPastDate, Item, parseTags } from '@taskpaper/core';
 import { outlineOf, visibleItems } from './outline';
 
 const projectLine = Decoration.line({ class: 'tp-project' });
 const doneLine = Decoration.line({ class: 'tp-done' });
 const noteLine = Decoration.line({ class: 'tp-note' });
+const doneProjectLine = Decoration.line({ class: 'tp-project tp-done' });
+const doneNoteLine = Decoration.line({ class: 'tp-note tp-done' });
+
+/** A completed task owns the visual completion state of its whole subtree. */
+export function isVisuallyDone(item: Item): boolean {
+  let current: Item | null = item;
+  while (current) {
+    if (current.tags.has('done') && (current === item || current.kind === 'task')) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
+}
 
 // Only the visible ranges are decorated (rebuilt on viewportChanged) — a
 // full-document rebuild costs ~17ms per keystroke on a 50k-line file.
@@ -15,14 +29,14 @@ function buildDecorations(view: EditorView): DecorationSet {
 
   for (const item of visibleItems(view, outline)) {
     const line = view.state.doc.line(item.line + 1);
-    const done = item.tags.has('done');
+    const done = isVisuallyDone(item);
 
     if (item.kind === 'project') {
-      builder.add(line.from, line.from, projectLine);
+      builder.add(line.from, line.from, done ? doneProjectLine : projectLine);
+    } else if (item.kind === 'note') {
+      builder.add(line.from, line.from, done ? doneNoteLine : noteLine);
     } else if (done) {
       builder.add(line.from, line.from, doneLine);
-    } else if (item.kind === 'note') {
-      builder.add(line.from, line.from, noteLine);
     }
 
     // The task's leading dash is a button: clicking it toggles @done
