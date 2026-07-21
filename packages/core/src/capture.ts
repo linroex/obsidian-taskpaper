@@ -129,7 +129,7 @@ function childIndent(project: Item, lines: string[]): string {
 /**
  * Normalize quick-capture input into a document line: trim, prefix `- `
  * unless the text is already a task or project, and resolve natural-language
- * date values inside recognized date tags (@due/@start/@defer) to ISO dates.
+ * date values inside recognized date tags (@at/@due/@start/@defer) to ISO dates.
  * Unresolvable date expressions are left as typed.
  */
 export function normalizeCaptureText(text: string, now: Date = new Date()): string {
@@ -143,7 +143,7 @@ export function normalizeCaptureText(text: string, now: Date = new Date()): stri
   if (lineKind(line) === 'note' && !stripTags(line).trimEnd().endsWith(':')) {
     line = '- ' + line;
   }
-  return line.replace(/(@(?:due|start|defer))\(([^)]*)\)/g, (full, name: string, value: string) => {
+  return line.replace(/(@(?:at|due|start|defer))\(([^)]*)\)/g, (full, name: string, value: string) => {
     const iso = resolveDateExpression(value.trim(), now);
     return iso ? `${name}(${iso})` : full;
   });

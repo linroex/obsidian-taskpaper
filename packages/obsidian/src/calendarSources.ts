@@ -80,13 +80,30 @@ export function fingerprintLines(lines: string[], fingerprint: string): number[]
   return found;
 }
 
-/** The rescheduled line text: @today items become dated (@today is replaced,
- *  per the agreed design); completed items move their @done date; everything
- *  else is @due. */
-export function rescheduledLine(lineText: string, role: CalendarRole, date: string): string {
-  return role === 'today'
-    ? addTag(removeTag(lineText, 'today'), 'due', date)
-    : setTagValue(lineText, role === 'completed' ? 'done' : 'due', date);
+/**
+ * Rewrite the date tags represented by a dragged occurrence. @today becomes a
+ * dated @due; merged same-day @at + @due rows move both, preserving @at time.
+ */
+export function rescheduledLine(
+  lineText: string,
+  roleOrRoles: CalendarRole | CalendarRole[],
+  date: string,
+  time?: string,
+): string {
+  const roles = Array.isArray(roleOrRoles) ? roleOrRoles : [roleOrRoles];
+  let out = lineText;
+  for (const role of roles) {
+    if (role === 'today') {
+      out = addTag(removeTag(out, 'today'), 'due', date);
+    } else if (role === 'completed') {
+      out = setTagValue(out, 'done', date);
+    } else if (role === 'at') {
+      out = setTagValue(out, 'at', time ? `${date} ${time}` : date);
+    } else {
+      out = setTagValue(out, 'due', date);
+    }
+  }
+  return out;
 }
 
 /** Ordering that keeps DOM identity stable across renders: path, then line. */
@@ -98,10 +115,21 @@ function byPathLine(a: SourcedOccurrence, b: SourcedOccurrence): number {
       : a.source.line - b.source.line;
 }
 
+/** Timed scheduled items first; otherwise retain the stable path/line order. */
+function byCalendarOrder(a: SourcedOccurrence, b: SourcedOccurrence): number {
+  if (a.time !== b.time) {
+    if (a.time === undefined) return 1;
+    if (b.time === undefined) return -1;
+    if (a.time !== b.time) return a.time < b.time ? -1 : 1;
+  }
+  return byPathLine(a, b);
+}
+
 /**
  * Build the merged month model over several documents. Every document shares
- * the same grid (same anchor/weekStart/today), so cells merge index-wise;
- * per-date occurrence order is (path, line) and overdue is (date, path, line).
+ * the same grid (same anchor/weekStart/today), so cells merge index-wise.
+ * Explicitly timed @at occurrences sort first; other rows retain path/line
+ * order. Overdue rows sort by date before that same per-day ordering.
  */
 export function sourcedCalendarModel(
   docs: CalendarSourceDoc[],
@@ -119,7 +147,13 @@ export function sourcedCalendarModel(
       if (!sourced) {
         sourced = {
           ...occ,
-          source: { path: doc.path, line: occ.line, fingerprint: occ.text.trim() },
+          // Display text may remove Markdown link syntax; source identity must
+          // continue to use the original line representation.
+          source: {
+            path: doc.path,
+            line: occ.line,
+            fingerprint: lineFingerprint(doc.lines[occ.line] ?? ''),
+          },
           badge: doc.badge,
         };
         wrapped.set(occ, sourced);
@@ -136,13 +170,13 @@ export function sourcedCalendarModel(
       inMonth: day.inMonth,
       occurrences: tagged
         .flatMap(({ model, wrap }) => model.weeks[w][d].occurrences.map(wrap))
-        .sort(byPathLine),
+        .sort(byCalendarOrder),
     })),
   );
 
   const overdue = tagged
     .flatMap(({ model, wrap }) => model.overdue.map(wrap))
-    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : byPathLine(a, b)));
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : byCalendarOrder(a, b)));
 
   const agendaByDate = new Map<string, SourcedOccurrence[]>();
   for (const { model, wrap } of tagged) {
@@ -157,7 +191,7 @@ export function sourcedCalendarModel(
   }
   const agenda = [...agendaByDate.keys()]
     .sort()
-    .map((date) => ({ date, occurrences: agendaByDate.get(date)!.sort(byPathLine) }));
+    .map((date) => ({ date, occurrences: agendaByDate.get(date)!.sort(byCalendarOrder) }));
 
   return { month: first.month, weeks, overdue, agenda };
 }

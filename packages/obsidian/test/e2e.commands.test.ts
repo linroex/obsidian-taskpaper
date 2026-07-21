@@ -379,7 +379,7 @@ async function main(): Promise<void> {
     check('no successor spawns without a date anchor', view.state.doc.lines === 5);
     check(
       'the no-anchor warning shows as a Notice',
-      Notice.messages.includes('@repeat 需要 @due 或 @start 日期才能產生下一次'),
+      Notice.messages.includes('@repeat 需要 @at、@due 或 @start 日期才能產生下一次'),
     );
     cleanup();
   }

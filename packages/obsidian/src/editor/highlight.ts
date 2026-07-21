@@ -49,6 +49,8 @@ function buildDecorations(view: EditorView): DecorationSet {
         if (!done && tag.value && isPastDate(tag.value)) {
           cls += ' tp-tag-overdue';
         }
+      } else if (tag.name === 'at') {
+        cls += ' tp-tag-at';
       }
       // Two marks per valued tag (TaskPaper 3): clicking the `@name` part
       // searches the tag, clicking the `(value)` part searches tag + value.

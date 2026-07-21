@@ -37,13 +37,13 @@ Project:
   and **Tags** (click to filter).
 - **Saved searches** — “Save Search…” stores a query as an `@search(...)` item under a
   `Searches:` project.
-- **Natural-language dates** — `@due(` completion and query dates accept `today`, `tomorrow`,
+- **Natural-language dates** — `@at(` / `@due(` completion and query dates accept `today`, `tomorrow`,
   `next friday`, `+1 week`, `3 days`, weekday names.
 - **Outline editing** — move an item + subtree with `Alt+↑/↓`, indent/outdent with
   `Alt+Shift+→/←`.
 - **Status bar** — today / overdue counts for the active file; click to show `@today`.
 - **Tag completion** — type `@` for known and in-document tags; value hints for
-  `@due(`, `@start(`, and `@priority(`.
+  `@at(`, `@due(`, `@start(`, and `@priority(`.
 - **Commands** (Command Palette → “TaskPaper: …”):
   | Command | Default key | Description |
   | --- | --- | --- |

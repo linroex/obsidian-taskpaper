@@ -248,9 +248,9 @@ export class TaskPaperCommands {
     ).open();
   }
 
-  /** Prompt for a natural-language date and set @due(date)/@start(date) on selected lines. */
-  tagWithDate(view: TaskPaperView, name: 'due' | 'start'): void {
-    const title = name === 'due' ? 'Tag with due' : 'Tag with start';
+  /** Prompt for a natural-language date and set a date tag on selected lines. */
+  tagWithDate(view: TaskPaperView, name: 'at' | 'due' | 'start'): void {
+    const title = name === 'at' ? 'Tag with at' : name === 'due' ? 'Tag with due' : 'Tag with start';
     new DateModal(this.plugin.app, title, (iso) => {
       this.applyToSelectedLines(view.editor, (text) => setTagValue(text, name, iso));
     }).open();
@@ -844,4 +844,3 @@ function selectedLineRange(state: EditorState): [number, number] {
   }
   return [start, end];
 }
-

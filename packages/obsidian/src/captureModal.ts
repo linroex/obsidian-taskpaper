@@ -4,8 +4,9 @@ import { normalizeCaptureText } from '@taskpaper/core';
 /**
  * Quick-capture prompt: a single line of text destined for the inbox file.
  * Shows the target (file › project) and a live preview of the normalized
- * line (`- ` prefix, natural-language dates in @due/@start/@defer resolved).
- * Enter submits, Escape cancels.
+ * line (`- ` prefix, natural-language dates in @at/@due/@start/@defer resolved).
+ * Enter submits, Escape cancels. Natural dates in @at/@due/@start/@defer are
+ * normalized by the shared capture planner before insertion.
  */
 export class CaptureModal extends Modal {
   constructor(

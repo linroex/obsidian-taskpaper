@@ -1228,6 +1228,80 @@ check('toggle from none focuses', toggleFocusTarget(null, 3) === 3);
   );
 }
 
+// --- calendar @at scheduling, role merging, time order, and display text ---
+{
+  const today = new Date(2026, 6, 12);
+  const atOutline = buildOutline(
+    [
+      '- date only @at(2026-07-14)',                              // 0
+      '- late @at(2026-07-14 15:30)',                             // 1
+      '- early @at(2026-07-14 09:05)',                            // 2
+      '- planned then due @at(2026-07-14 11:00) @due(2026-07-21)', // 3
+      '- merged @at(2026-07-22 10:00) @due(2026-07-22)',          // 4
+      '- scheduled beats today @at(2026-07-23) @today',           // 5
+      '- clock only @at(15:30)',                                  // 6
+      '- invalid falls back @at(banana) @today',                  // 7
+      '- [linked task](https://example.com/a_(b)) @due(2026-07-16)', // 8
+      '- completed @at(2026-07-19) @due(2026-07-20) @done(2026-07-18)', // 9
+      '- natural time @at(next friday 3pm)',                      // 10
+    ],
+    4,
+  );
+  const model = calendarModel(
+    atOutline,
+    '2026-07',
+    { showCompleted: true, weekStart: 1 },
+    today,
+  );
+  const on = (date: string) =>
+    model.weeks.flat().find((day) => day.date === date)?.occurrences ?? [];
+  const all = model.weeks.flatMap((week) => week.flatMap((day) => day.occurrences));
+
+  check(
+    'cal @at: timed rows sort by time before untimed rows',
+    on('2026-07-14').map((occ) => occ.text).join(',') ===
+      'early,planned then due,late,date only',
+    on('2026-07-14').map((occ) => `${occ.time ?? '--:--'} ${occ.text}`).join(','),
+  );
+  check(
+    'cal @at: explicit time is normalized to HH:mm',
+    on('2026-07-14')[0]?.time === '09:05' && on('2026-07-14')[2]?.time === '15:30',
+  );
+  check(
+    'cal @at+due: different dates produce independently draggable occurrences',
+    all.filter((occ) => occ.line === 3).map((occ) => `${occ.date}:${occ.roles.join('+')}`).join(',') ===
+      '2026-07-14:at,2026-07-21:due',
+  );
+  check(
+    'cal @at+due: same date merges into one occurrence with both roles',
+    on('2026-07-22').length === 1 && on('2026-07-22')[0].roles.join(',') === 'at,due',
+    JSON.stringify(on('2026-07-22')),
+  );
+  check(
+    'cal @at: a valid schedule suppresses the virtual @today fallback',
+    all.filter((occ) => occ.line === 5).map((occ) => occ.date).join(',') === '2026-07-23',
+  );
+  check('cal @at: a clock without a date is ignored', !all.some((occ) => occ.line === 6));
+  check(
+    'cal @at: an invalid schedule still allows @today fallback',
+    on('2026-07-12').some((occ) => occ.line === 7 && occ.role === 'today'),
+  );
+  check(
+    'cal display: Markdown link syntax becomes its label only',
+    on('2026-07-16').find((occ) => occ.line === 8)?.text === 'linked task',
+    on('2026-07-16').find((occ) => occ.line === 8)?.text,
+  );
+  check(
+    'cal @done: completion replaces scheduled and due occurrences',
+    all.filter((occ) => occ.line === 9).map((occ) => `${occ.date}:${occ.role}`).join(',') ===
+      '2026-07-18:completed',
+  );
+  check(
+    'cal @at: natural date-time expressions retain their resolved time',
+    on('2026-07-17').some((occ) => occ.line === 10 && occ.time === '15:00'),
+  );
+}
+
 // --- recurring tasks: parseRepeat / advanceDate / planToggleDone ---
 {
   // parseRepeat validity matrix.
@@ -1275,11 +1349,14 @@ check('toggle from none focuses', toggleFocusTarget(null, 3) === 3);
 
   // Every date anchor advances from its OWN value; @today is dropped.
   {
-    const doc = ['- multi @start(2026-07-01) @due(2026-07-03) @today @repeat(2d)'];
+    const doc = [
+      '- multi @at(2026-07-01 09:30) @start(2026-07-01) @due(2026-07-03) @today @repeat(2d)',
+    ];
     const plan = planToggleDone(doc, [0], repOpts);
     check(
-      'plan: due and start both advance, @today dropped',
-      plan.inserts[0]?.text === '- multi @start(2026-07-03) @due(2026-07-05) @repeat(2d)',
+      'plan: at, due and start all advance, @at time survives, @today drops',
+      plan.inserts[0]?.text ===
+        '- multi @at(2026-07-03 09:30) @start(2026-07-03) @due(2026-07-05) @repeat(2d)',
       JSON.stringify(plan.inserts),
     );
   }
@@ -1539,6 +1616,12 @@ check('toggle from none focuses', toggleFocusTarget(null, 3) === 3);
     normalizeCaptureText('a @start(next fri) @flag(soon)', capNow) ===
       '- a @start(2026-07-10) @flag(soon)',
     normalizeCaptureText('a @start(next fri) @flag(soon)', capNow),
+  );
+  check(
+    'capture: @at resolves date and time to a stable ISO value',
+    normalizeCaptureText('meeting @at(tomorrow 3:30pm)', capNow) ===
+      '- meeting @at(2026-07-09 15:30)',
+    normalizeCaptureText('meeting @at(tomorrow 3:30pm)', capNow),
   );
   check(
     'capture: unresolvable date value is left as typed',

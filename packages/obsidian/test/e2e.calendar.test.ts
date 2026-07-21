@@ -129,6 +129,11 @@ function dragTo(fx: CalendarFixture, occText: string, toDate: string): void {
   const occ = Array.from(fx.root.querySelectorAll<HTMLElement>('.tp-cal-occ')).find((el) =>
     el.textContent?.includes(occText),
   )!;
+  dragOccurrenceTo(fx, occ, toDate);
+}
+
+/** Drag a specific occurrence element when one task appears on multiple days. */
+function dragOccurrenceTo(fx: CalendarFixture, occ: HTMLElement, toDate: string): void {
   occ.dispatchEvent(new window.Event('dragstart', { bubbles: true }));
   const cell = fx.cell(toDate)!;
   cell.dispatchEvent(new window.Event('dragover', { bubbles: true }));
@@ -374,6 +379,98 @@ function textOf(occ: HTMLElement): string {
   cell.dispatchEvent(new window.Event('drop', { bubbles: true }));
   check('a drifted document rejects the drop', docText(fx.editor) === before);
   check('the rejection shows a notice', Notice.messages[Notice.messages.length - 1]?.includes('未改期') === true, String(Notice.messages[Notice.messages.length - 1]));
+  fx.cleanup();
+}
+
+// --- @at scheduling + Markdown-link calendar titles ---
+{
+  const doc = [
+    '- [測試連結](https://example.com/page) @due(2026-07-16)', // 0
+    '- morning @at(2026-07-15 09:30)',                        // 1
+    '- later @at(2026-07-15 15:00)',                          // 2
+    '- untimed @at(2026-07-15)',                              // 3
+    '- split @at(2026-07-14 10:00) @due(2026-07-20)',         // 4
+    '- merged @at(2026-07-18 11:00) @due(2026-07-18)',        // 5
+    '- clock only @at(15:30)',                                // 6
+    '- finished @at(2026-07-19) @due(2026-07-20) @done(2026-07-17)', // 7
+  ].join('\n');
+  const fx = mountCalendar(doc);
+
+  const link = fx.occs(fx.cell('2026-07-16')!)[0];
+  check('calendar hides Markdown link syntax', textOf(link) === '測試連結', textOf(link));
+  check(
+    'calendar title contains neither Markdown target nor brackets',
+    !link.querySelector('.tp-cal-occ-text')!.textContent!.includes('https://') &&
+      !link.querySelector('.tp-cal-occ-text')!.textContent!.includes('['),
+  );
+  link.click();
+  check(
+    'plain-link occurrence still jumps to its Markdown source line',
+    fx.editor.state.doc.lineAt(fx.editor.state.selection.main.head).number === 1,
+  );
+  dragOccurrenceTo(fx, fx.occs(fx.cell('2026-07-16')!)[0], '2026-07-21');
+  check(
+    'plain-link occurrence still reschedules the original Markdown task',
+    docText(fx.editor).split('\n')[0] ===
+      '- [測試連結](https://example.com/page) @due(2026-07-21)',
+    docText(fx.editor).split('\n')[0],
+  );
+
+  const scheduled = fx.occs(fx.cell('2026-07-15')!);
+  check(
+    'timed @at rows sort before untimed rows by time',
+    scheduled.map(textOf).join(',') === 'morning,later,untimed',
+    scheduled.map(textOf).join(','),
+  );
+  check(
+    '@at renders its time and scheduled-role dot',
+    scheduled[0].querySelector('.tp-cal-occ-time')?.textContent === '09:30' &&
+      scheduled[0].querySelector('.tp-cal-dot-at') !== null,
+  );
+
+  const splitAt = fx.occs(fx.cell('2026-07-14')!).find((occ) => textOf(occ) === 'split')!;
+  const splitDue = fx.occs(fx.cell('2026-07-20')!).find((occ) => textOf(occ) === 'split')!;
+  check(
+    'different @at and @due dates render two independently-typed rows',
+    splitAt.dataset.roles === 'at' && splitDue.dataset.roles === 'due',
+    `${splitAt.dataset.roles}/${splitDue.dataset.roles}`,
+  );
+  dragOccurrenceTo(fx, splitAt, '2026-07-22');
+  check(
+    'dragging the scheduled row moves only @at and preserves its time',
+    docText(fx.editor).split('\n')[4] ===
+      '- split @at(2026-07-22 10:00) @due(2026-07-20)',
+    docText(fx.editor).split('\n')[4],
+  );
+
+  const merged = fx.occs(fx.cell('2026-07-18')!).find((occ) => textOf(occ) === 'merged')!;
+  check(
+    'same-day @at+@due renders once with both role dots',
+    merged.dataset.roles === 'at,due' &&
+      merged.querySelectorAll('.tp-cal-dot').length === 2 &&
+      merged.querySelector('.tp-cal-dot-at') !== null &&
+      merged.querySelector('.tp-cal-dot-due') !== null,
+  );
+  dragOccurrenceTo(fx, merged, '2026-07-23');
+  check(
+    'dragging a merged row moves both tags and preserves @at time',
+    docText(fx.editor).split('\n')[5] ===
+      '- merged @at(2026-07-23 11:00) @due(2026-07-23)',
+    docText(fx.editor).split('\n')[5],
+  );
+
+  check('time-only @at produces no calendar row', !fx.occs().some((occ) => textOf(occ) === 'clock only'));
+  check(
+    'completed task suppresses active @at and @due rows',
+    !fx.occs().some((occ) => textOf(occ) === 'finished'),
+  );
+  fx.button('tp-cal-done-toggle')!.click();
+  check(
+    '顯示已完成 shows that task only on @done date',
+    fx.occs(fx.cell('2026-07-17')!).map(textOf).join(',') === 'finished' &&
+      fx.occs(fx.cell('2026-07-19')!).every((occ) => textOf(occ) !== 'finished') &&
+      fx.occs(fx.cell('2026-07-20')!).every((occ) => textOf(occ) !== 'finished'),
+  );
   fx.cleanup();
 }
 

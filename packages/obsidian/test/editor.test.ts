@@ -759,7 +759,7 @@ check('url opens as-is', linkHref({ kind: 'url', text: 'https://a.com' }) === 'h
   const names = collectTagNames(buildOutline(['Inbox:', '\t- a @waiting(bob)'], 4));
   check(
     'completion names = document tags + defaults',
-    names.includes('waiting') && names.includes('done') && names.includes('today'),
+    names.includes('waiting') && names.includes('at') && names.includes('done') && names.includes('today'),
   );
   check('completion names are sorted + deduped', names.indexOf('done') < names.indexOf('waiting'));
 }
@@ -833,6 +833,19 @@ check('url opens as-is', linkHref({ kind: 'url', text: 'https://a.com' }) === 'h
     'a date suggestion applies its resolved ISO date',
     today !== undefined && today.apply === resolveDateExpression('today'),
     String(today?.apply),
+  );
+}
+{
+  const doc = '- x @at(';
+  const result = tagCompletionSource(
+    new CompletionContext(EditorState.create({ doc }), doc.length, false),
+  );
+  check(
+    '@at( offers the same resolved date suggestions as other date tags',
+    result !== null &&
+      ['today', 'tomorrow', 'next week'].every((label) =>
+        result.options.some((option) => option.label === label),
+      ),
   );
 }
 {
@@ -1170,6 +1183,27 @@ check('adjacent identity drop is a no-op', planFreeDrag(DRAG_DOC, 2, 1, true, 4)
 }
 
 {
+  const model = sourcedCalendarModel(
+    [
+      {
+        path: 'links.taskpaper',
+        lines: ['- [linked task](https://example.com/page) @at(2026-07-15 09:30)'],
+      },
+    ],
+    '2026-07',
+    { showCompleted: false, weekStart: 1 },
+    new Date(2026, 6, 12),
+  );
+  const occurrence = model.weeks.flat().find((day) => day.date === '2026-07-15')!.occurrences[0];
+  check('calendar source displays only the Markdown label', occurrence.text === 'linked task');
+  check(
+    'calendar source fingerprint retains Markdown syntax for click/drag relocation',
+    occurrence.source.fingerprint === '[linked task](https://example.com/page)',
+    occurrence.source.fingerprint,
+  );
+}
+
+{
   check('lineFingerprint strips indent, marker and tags', lineFingerprint('\t- task @due(2026-01-01)') === 'task');
   check(
     'an untitled dated task falls back to its raw text, never the blank fingerprint',
@@ -1195,6 +1229,20 @@ check('adjacent identity drop is a no-op', planFreeDrag(DRAG_DOC, 2, 1, true, 4)
   check(
     'rescheduledLine moves @done for completed items',
     rescheduledLine('- t @done(2026-07-01)', 'completed', '2026-07-05') === '- t @done(2026-07-05)',
+  );
+  check(
+    'rescheduledLine moves @at and preserves its time',
+    rescheduledLine('- t @at(2026-07-01 15:30) @due(2026-07-09)', ['at'], '2026-07-05', '15:30') ===
+      '- t @at(2026-07-05 15:30) @due(2026-07-09)',
+  );
+  check(
+    'rescheduledLine moves both tags for a merged @at+@due occurrence',
+    rescheduledLine(
+      '- t @at(2026-07-01 09:00) @due(2026-07-01)',
+      ['at', 'due'],
+      '2026-07-05',
+      '09:00',
+    ) === '- t @at(2026-07-05 09:00) @due(2026-07-05)',
   );
 }
 

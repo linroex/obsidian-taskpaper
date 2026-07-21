@@ -690,7 +690,8 @@ const DOC = [
   check('repeat: no successor without a date anchor', view.state.doc.lines === 1);
   check(
     'repeat: the no-anchor warning reaches the host notify (a Notice in production)',
-    host.notices.length === 1 && host.notices[0] === '@repeat 需要 @due 或 @start 日期才能產生下一次',
+    host.notices.length === 1 &&
+      host.notices[0] === '@repeat 需要 @at、@due 或 @start 日期才能產生下一次',
     host.notices.join(' | '),
   );
   cleanup();

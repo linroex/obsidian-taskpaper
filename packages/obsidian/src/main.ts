@@ -257,6 +257,7 @@ export default class TaskPaperPlugin extends Plugin {
     cmd('duplicate', 'Duplicate', (v) => this.commands.duplicate(v));
     cmd('delete-items', 'Delete items', (v) => this.commands.deleteItems(v));
     cmd('move-to-project', 'Move to project…', (v) => this.commands.moveToProject(v));
+    cmd('tag-with-at', 'Tag with at…', (v) => this.commands.tagWithDate(v, 'at'));
     cmd('tag-with-due', 'Tag with due…', (v) => this.commands.tagWithDate(v, 'due'));
     cmd('tag-with-start', 'Tag with start…', (v) => this.commands.tagWithDate(v, 'start'));
     cmd('insert-date', 'Insert date…', (v) => this.commands.insertDate(v));

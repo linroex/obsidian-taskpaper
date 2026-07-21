@@ -256,7 +256,7 @@ export class TaskPaperSettingTab extends PluginSettingTab {
       .setDesc('以空白或逗號分隔（可加 @）。留空表示顯示文件中找到的所有標籤；列出的標籤即使數量為 0 也會顯示。')
       .addText((t) =>
         t
-          .setPlaceholder('@due @start @today @done')
+          .setPlaceholder('@at @due @start @today @done')
           .setValue(this.plugin.settings.includeTags)
           .onChange(async (v) => {
             this.plugin.settings.includeTags = v;

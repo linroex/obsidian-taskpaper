@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { resolveDateExpression, todayStamp } from '@taskpaper/core';
 import { getOutline, tabSizeFor } from '../outline';
 
-const BUILTIN_TAGS = ['done', 'today', 'due', 'start', 'priority', 'flag', 'search'];
+const BUILTIN_TAGS = ['at', 'done', 'today', 'due', 'start', 'priority', 'flag', 'search'];
 
 /** Completes tag names after `@` and offers value hints for known value tags. */
 export class TaskPaperCompletionProvider implements vscode.CompletionItemProvider {
@@ -12,8 +12,8 @@ export class TaskPaperCompletionProvider implements vscode.CompletionItemProvide
   ): vscode.CompletionItem[] {
     const prefix = document.lineAt(position.line).text.slice(0, position.character);
 
-    // Value completion: @due( , @start( , @priority(
-    const valueMatch = /@(due|start|priority)\($/.exec(prefix);
+    // Value completion: @at( , @due( , @start( , @priority(
+    const valueMatch = /@(at|due|start|priority)\($/.exec(prefix);
     if (valueMatch) {
       return valueCompletions(valueMatch[1]);
     }
@@ -45,7 +45,7 @@ export class TaskPaperCompletionProvider implements vscode.CompletionItemProvide
       item.range = replaceRange;
       if (name === 'done') {
         item.insertText = new vscode.SnippetString(`done(\${1:${todayStamp(false)}})`);
-      } else if (name === 'due' || name === 'start') {
+      } else if (name === 'at' || name === 'due' || name === 'start') {
         item.insertText = new vscode.SnippetString(`${name}(\${1:${todayStamp(false)}})`);
       } else if (name === 'priority') {
         item.insertText = new vscode.SnippetString('priority(${1|1,2,3|})');
@@ -65,7 +65,7 @@ function valueCompletions(tag: string): vscode.CompletionItem[] {
       return item;
     });
   }
-  // due / start: offer natural-language date values, resolved to ISO on insert.
+  // at / due / start: offer natural-language date values, resolved on insert.
   const expressions = [
     'today',
     'tomorrow',

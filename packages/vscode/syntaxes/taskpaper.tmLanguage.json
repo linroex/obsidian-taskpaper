@@ -68,7 +68,7 @@
       }
     },
     "tag-due": {
-      "match": "(@)(due|start)\\b(\\()?((?:\\\\.|[^)\\\\])*)?(\\))?",
+      "match": "(@)(at|due|start)\\b(\\()?((?:\\\\.|[^)\\\\])*)?(\\))?",
       "captures": {
         "1": { "name": "punctuation.definition.tag.taskpaper" },
         "2": { "name": "keyword.control.tag.due.taskpaper" },

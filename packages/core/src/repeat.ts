@@ -2,7 +2,7 @@
  * Recurring tasks: `@repeat(<n><unit>)` with unit d/w/m/y (e.g. `1w`, `10d`).
  *
  * Recurrence is STRICT — the next occurrence advances from the existing date
- * anchors (`@due`/`@start`/`@defer`), not from the completion date. It fires
+ * anchors (`@at`/`@due`/`@start`/`@defer`), not from the completion date. It fires
  * only through the toggle-done paths (planToggleDone); typing `@done` by hand
  * never spawns anything.
  */
@@ -75,9 +75,9 @@ export interface ToggleDoneOptions {
   now?: Date;
 }
 
-export const REPEAT_NEEDS_DATE_NOTICE = '@repeat 需要 @due 或 @start 日期才能產生下一次';
+export const REPEAT_NEEDS_DATE_NOTICE = '@repeat 需要 @at、@due 或 @start 日期才能產生下一次';
 
-const ANCHOR_TAGS = ['due', 'start', 'defer'] as const;
+const ANCHOR_TAGS = ['at', 'due', 'start', 'defer'] as const;
 
 /**
  * Plan toggling @done on a set of lines against ONE document snapshot.

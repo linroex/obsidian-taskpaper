@@ -196,7 +196,10 @@ export function createCalendarHost(ctx: CalendarHostContext): CalendarHost {
           return;
         }
         const doc = own.state().doc;
-        own.setLineText(line, rescheduledLine(doc.line(line + 1).text, occ.role, date));
+        own.setLineText(
+          line,
+          rescheduledLine(doc.line(line + 1).text, occ.roles, date, occ.time),
+        );
         return;
       }
       const view = openViewFor(occ.source.path);
@@ -206,7 +209,7 @@ export function createCalendarHost(ctx: CalendarHostContext): CalendarHost {
         if (typeof where !== 'number') {
           new Notice(where === 'missing' ? STALE_RESCHEDULE : AMBIGUOUS_RESCHEDULE);
         } else {
-          view.setLineText(where, rescheduledLine(lines[where], occ.role, date));
+          view.setLineText(where, rescheduledLine(lines[where], occ.roles, date, occ.time));
         }
         ctx.refresh();
         return;
@@ -227,7 +230,7 @@ export function createCalendarHost(ctx: CalendarHostContext): CalendarHost {
             new Notice(where === 'missing' ? STALE_RESCHEDULE : AMBIGUOUS_RESCHEDULE);
             return data;
           }
-          lines[where] = rescheduledLine(lines[where], occ.role, date);
+          lines[where] = rescheduledLine(lines[where], occ.roles, date, occ.time);
           return lines.join('\n');
         })
         .then(() => ctx.refresh());

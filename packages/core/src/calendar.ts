@@ -3,15 +3,16 @@ import { stripTags } from './tags';
  * Calendar model — pure date placement of a document's tasks onto a month
  * grid + agenda list, shared by the calendar views.
  *
- * ONE-day semantics: every task occupies at most one calendar day:
+ * Calendar placement semantics:
  *
- *   - @due(date)            → role 'due' on that date
+ *   - @at(date/time)        → role 'at' on the scheduled date, with time
+ *   - @due(date)            → role 'due' on the deadline date
+ *   - @at + @due            → both dates; same-day roles merge into one row
  *   - @start + @due         → the due date only (@start alone places nothing)
- *   - @today without @due   → a virtual occurrence on today's date
- *   - @today with @due      → the due date once (no duplicate)
+ *   - @today without @at/due → a virtual occurrence on today's date
  *   - @done(date)           → role 'completed' on the done date, only when
- *                             opts.showCompleted; a done item never also
- *                             appears as due/today
+ *                             opts.showCompleted; completion replaces every
+ *                             active occurrence
  *
  * All date math is LOCAL time (parseDate already treats bare dates as local
  * midnight — never Date.parse's UTC).
@@ -20,7 +21,7 @@ import { parseDate } from './dates';
 import { Item, Outline } from './model';
 import { ancestorProjectPath } from './archive';
 
-export type CalendarRole = 'due' | 'today' | 'completed';
+export type CalendarRole = 'at' | 'due' | 'today' | 'completed';
 
 export interface CalendarOccurrence {
   /** 0-based line of the source item. */
@@ -29,9 +30,14 @@ export interface CalendarOccurrence {
   text: string;
   /** Ancestor projects joined ' / ' (outermost first), or undefined at top level. */
   projectPath: string | undefined;
+  /** Primary role, retained for consumers that only need one role. */
   role: CalendarRole;
+  /** Every role represented by this row (same-day @at + @due are merged). */
+  roles: CalendarRole[];
   /** YYYY-MM-DD (local). */
   date: string;
+  /** HH:mm for an @at value with an explicit time, otherwise undefined. */
+  time?: string;
 }
 
 export interface CalendarDay {
@@ -60,10 +66,6 @@ export interface CalendarOptions {
   weekStart: number;
 }
 
-/** Strip trailing @tag(...)s from a display text (same shape the sidebar uses). */
-
-
-/** Format a local Date as YYYY-MM-DD. */
 /** Format a local Date as YYYY-MM. */
 export function isoMonth(d: Date): string {
   return isoDate(d).slice(0, 7);
@@ -74,43 +76,111 @@ export function isoDate(d: Date): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-/** Resolve a tag value to a local YYYY-MM-DD, or null when unparsable. */
-function tagDate(value: string | undefined, now: Date): string | null {
+interface ResolvedCalendarDate {
+  date: string;
+  time?: string;
+}
+
+/** A clock without a date changes meaning every day, so @at(15:30) is invalid. */
+const TIME_ONLY = /^\s*(?:\d{1,2}(?::\d{2})(?::\d{2})?\s*(?:am|pm)?|\d{1,2}\s*(?:am|pm))(?:\s|$)/i;
+
+/** Whether the source expression explicitly carries a wall-clock time. */
+const EXPLICIT_TIME =
+  /(?:^|[\sT])\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:am|pm))?(?=$|\s|Z|[+-]\d{2}:?\d{2})|\b\d{1,2}\s*(?:am|pm)\b|\bnow\b/i;
+
+/** Resolve a tag value to a local date and optional explicit time. */
+function tagDate(
+  value: string | undefined,
+  now: Date,
+  rejectTimeOnly = false,
+): ResolvedCalendarDate | null {
   if (!value) {
     return null;
   }
+  if (rejectTimeOnly && TIME_ONLY.test(value)) {
+    return null;
+  }
   const ts = parseDate(value, now);
-  return Number.isNaN(ts) ? null : isoDate(new Date(ts));
+  if (Number.isNaN(ts)) {
+    return null;
+  }
+  const resolved = new Date(ts);
+  const time = EXPLICIT_TIME.test(value)
+    ? `${String(resolved.getHours()).padStart(2, '0')}:${String(resolved.getMinutes()).padStart(2, '0')}`
+    : undefined;
+  return { date: isoDate(resolved), time };
 }
 
-/** The single calendar occurrence a task produces, or null. */
-function occurrenceFor(
+/** Calendar-safe title: tags removed and Markdown links reduced to labels. */
+export function calendarDisplayText(text: string): string {
+  return stripTags(text).replace(
+    /!?\[([^\[\]\n]+)\]\(([^()\s]+(?:\([^()\s]*\)[^()\s]*)*)\)/g,
+    '$1',
+  );
+}
+
+/** The calendar occurrences a task produces (zero, one, or scheduled + due). */
+function occurrencesFor(
   item: Item,
   todayStr: string,
   showCompleted: boolean,
   now: Date,
-): CalendarOccurrence | null {
+): CalendarOccurrence[] {
   if (item.kind !== 'task') {
-    return null;
+    return [];
   }
   const base = {
     line: item.line,
-    text: stripTags(item.displayText),
+    text: calendarDisplayText(item.displayText),
     projectPath: ancestorProjectPath(item),
   };
   if (item.tags.has('done')) {
-    // A done item never also appears as due/today.
-    const date = showCompleted ? tagDate(item.tags.get('done'), now) : null;
-    return date ? { ...base, role: 'completed', date } : null;
+    // A done item never also appears as at/due/today.
+    const done = showCompleted ? tagDate(item.tags.get('done'), now) : null;
+    return done
+      ? [{ ...base, role: 'completed', roles: ['completed'], date: done.date }]
+      : [];
   }
+
+  const occurrences: CalendarOccurrence[] = [];
+  const scheduled = tagDate(item.tags.get('at'), now, true);
+  if (scheduled) {
+    occurrences.push({
+      ...base,
+      role: 'at',
+      roles: ['at'],
+      date: scheduled.date,
+      time: scheduled.time,
+    });
+  }
+
   const due = tagDate(item.tags.get('due'), now);
   if (due) {
-    return { ...base, role: 'due', date: due };
+    const sameDay = occurrences.find((occ) => occ.date === due.date);
+    if (sameDay) {
+      sameDay.roles.push('due');
+    } else {
+      occurrences.push({ ...base, role: 'due', roles: ['due'], date: due.date });
+    }
   }
-  if (item.tags.has('today')) {
-    return { ...base, role: 'today', date: todayStr };
+
+  if (occurrences.length === 0 && item.tags.has('today')) {
+    occurrences.push({ ...base, role: 'today', roles: ['today'], date: todayStr });
   }
-  return null;
+  return occurrences;
+}
+
+/** Timed @at occurrences sort first, then untimed rows retain outline order. */
+export function compareCalendarOccurrences(
+  a: CalendarOccurrence,
+  b: CalendarOccurrence,
+): number {
+  if (a.time !== b.time) {
+    if (a.time === undefined) return 1;
+    if (b.time === undefined) return -1;
+    return a.time < b.time ? -1 : 1;
+  }
+  return a.line - b.line;
 }
 
 /**
@@ -132,22 +202,25 @@ export function calendarModel(
   const byDate = new Map<string, CalendarOccurrence[]>();
   const overdue: CalendarOccurrence[] = [];
   for (const item of outline.items) {
-    const occ = occurrenceFor(item, todayStr, opts.showCompleted, todayMidnight);
-    if (!occ) {
-      continue;
-    }
-    let list = byDate.get(occ.date);
-    if (!list) {
-      list = [];
-      byDate.set(occ.date, list);
-    }
-    list.push(occ); // outline order = line order
-    if (occ.role === 'due' && occ.date < todayStr) {
-      overdue.push(occ);
+    for (const occ of occurrencesFor(item, todayStr, opts.showCompleted, today)) {
+      let list = byDate.get(occ.date);
+      if (!list) {
+        list = [];
+        byDate.set(occ.date, list);
+      }
+      list.push(occ);
+      if (occ.roles.includes('due') && occ.date < todayStr) {
+        overdue.push(occ);
+      }
     }
   }
+  for (const list of byDate.values()) {
+    list.sort(compareCalendarOccurrences);
+  }
   // YYYY-MM-DD compares correctly as a string.
-  overdue.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.line - b.line));
+  overdue.sort((a, b) =>
+    a.date < b.date ? -1 : a.date > b.date ? 1 : compareCalendarOccurrences(a, b),
+  );
 
   // Full-week grid covering the anchor month.
   const [year, month] = monthAnchor.split('-').map(Number);

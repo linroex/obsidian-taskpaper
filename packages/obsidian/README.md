@@ -40,7 +40,7 @@ Project:
   run), **Projects** (click to focus, with a remaining-count badge), and **Tags** (click to filter).
 - **Saved searches**: "Save search…" stores a query as an `@search(...)` item under a `Searches:`
   project; it then appears in the sidebar.
-- **Natural-language dates**: `@due` / query dates accept `today`, `tomorrow`, `next friday`,
+- **Natural-language dates**: `@at` / `@due` / query dates accept `today`, `tomorrow`, `next friday`,
   `+1 week`, `3 days`, weekday names — resolved to real dates (e.g. `@due <= "next friday" [d]`).
 - **Outline editing**: move an item + its subtree with `Alt+↑/↓`, indent/outdent with
   `Alt+Shift+→/←`.
@@ -48,9 +48,13 @@ Project:
 - **Links**: bare URLs, `[label](url)` markdown links, and `[[wikilinks]]` (with
   `[[Note|alias]]` / `[[Note#heading]]`) render live-preview style — syntax hides until the
   cursor touches it. Unresolved wikilinks are dimmed; clicking them never creates a note.
-- **Calendar view** (in-tab toggle): month grid + agenda of `@due` / `@today` items with
-  drag-to-reschedule, and a 「本檔 | 全部」scope switch that aggregates every `.taskpaper`
-  file in the vault (foreign items carry a file badge; clicking opens the file at the line).
+- **Calendar view** (in-tab toggle): month grid + agenda of scheduled `@at`, deadline `@due`,
+  and virtual `@today` items with drag-to-reschedule. `@at(2026-07-15 09:30)` displays and
+  sorts by time; a task with different `@at` / `@due` dates appears on both days, while
+  same-day roles merge. `@at` must include a date, so a clock-only value such as
+  `@at(15:30)` is ignored. Markdown links display their label instead of raw link syntax.
+  The 「本檔 | 全部」scope switch aggregates every `.taskpaper` file in the vault (foreign
+  items carry a file badge; clicking opens the file at the line).
 - **Quick capture** (「快速新增任務」, works anywhere in Obsidian): one-line modal that
   appends a task to your inbox file — `@due(tomorrow)`-style dates resolve as you type,
   the inbox file/project is configurable and auto-created.
@@ -82,13 +86,13 @@ The **Filter…** command accepts TaskPaper item-path queries:
 
 - **只在「切換完成」時觸發**：點擊任務的破折號、Toggle Done 指令、右鍵選單都會觸發；
   手動輸入 `@done` 不會產生下一次。
-- **嚴格週期**：下一次的日期從既有的 `@due` / `@start` / `@defer` 值往後推進，
+- **嚴格週期**：下一次的日期從既有的 `@at` / `@due` / `@start` / `@defer` 值往後推進，
   與完成當天無關。例如 `- 澆花 @due(2026-07-01) @repeat(1w)` 完成後產生
   `- 澆花 @due(2026-07-08) @repeat(1w)`。
 - 月／年推進採日曆計算，月底自動夾住：1/31 +1m → 2/28（閏年 2/29）；2024-02-29 +1y → 2025-02-28。
 - 只有 `@today`（無日期標籤）時：下一次改為 `@due(今天 + 週期)` 並移除 `@today`。
-- 完全沒有日期依據（無 `@due` / `@start` / `@defer` / `@today`）：照常標記完成，
-  但不產生下一次，並顯示提示「@repeat 需要 @due 或 @start 日期才能產生下一次」。
+- 完全沒有日期依據（無 `@at` / `@due` / `@start` / `@defer` / `@today`）：照常標記完成，
+  但不產生下一次，並顯示提示「@repeat 需要 @at、@due 或 @start 日期才能產生下一次」。
 - 下一次會插在完成項目**整個子樹之後**、相同縮排（子項目屬於已完成的那一次）。
 - 完成與產生下一次在**同一筆編輯**內：一次 Cmd+Z 會同時還原兩者。
   取消完成（再點一次）不會移除已產生的下一次；若再次完成，只要下一行已是相同的

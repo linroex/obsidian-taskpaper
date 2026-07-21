@@ -192,6 +192,7 @@ body.taskpaper-no-strike .tp-done {
 /* On a done line, tags dim along with the text instead of keeping their
  * accent colors (matching the original: the whole item fades). */
 .tp-done .tp-tag,
+.tp-done .tp-tag-at,
 .tp-done .tp-tag-today,
 .tp-done .tp-tag-due,
 .tp-done .tp-tag-done {
@@ -226,6 +227,10 @@ body.taskpaper-no-strike .tp-done {
 
 .tp-tag-due {
   color: var(--text-accent);
+}
+
+.tp-tag-at {
+  color: var(--color-purple, var(--text-accent));
 }
 
 .tp-tag-overdue {
@@ -723,6 +728,7 @@ body.taskpaper-no-strike .tp-done {
   --tp-secondary: color-mix(in srgb, var(--text-normal) 72%, transparent);
   --tp-tertiary: color-mix(in srgb, var(--text-normal) 52%, transparent);
   /* Semantic occurrence colors, theme-derived where a native var exists. */
+  --tp-cal-at: var(--color-purple, #8b5cf6);
   --tp-cal-due: var(--interactive-accent);
   --tp-cal-today: var(--color-green, #2ea04b);
   --tp-cal-overdue: var(--color-red, #e03131);
@@ -881,12 +887,22 @@ body.taskpaper-no-strike .tp-done {
   white-space: nowrap;
 }
 
+.taskpaper-calendar .tp-cal-occ-time {
+  flex: none;
+  color: var(--tp-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
 .taskpaper-calendar .tp-cal-dot {
   flex: none;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   align-self: center;
+}
+
+.taskpaper-calendar .tp-cal-dot-at {
+  background: var(--tp-cal-at);
 }
 
 .taskpaper-calendar .tp-cal-dot-due {

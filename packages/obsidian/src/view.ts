@@ -467,6 +467,7 @@ export class TaskPaperView extends TextFileView {
     menu.addItem((i) => i.setTitle('Toggle done').setIcon('check').onClick(() => cmds.toggleDone(this)));
     menu.addItem((i) => i.setTitle('Toggle today').setIcon('sun').onClick(() => cmds.toggleToday(this)));
     menu.addItem((i) => i.setTitle('Tag with…').setIcon('tag').onClick(() => cmds.toggleTag(this)));
+    menu.addItem((i) => i.setTitle('Tag with at…').setIcon('clock').onClick(() => cmds.tagWithDate(this, 'at')));
     menu.addItem((i) => i.setTitle('Tag with due…').setIcon('calendar').onClick(() => cmds.tagWithDate(this, 'due')));
     menu.addSeparator();
     menu.addItem((i) => i.setTitle('Focus project').setIcon('target').onClick(() => cmds.focus(this)));

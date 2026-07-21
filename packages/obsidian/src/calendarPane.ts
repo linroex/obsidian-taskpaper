@@ -1,5 +1,11 @@
 import { Notice, setIcon } from 'obsidian';
-import { CalendarOptions, isoDate, isoMonth, isoWeekLabel } from '@taskpaper/core';
+import {
+  CalendarOptions,
+  CalendarRole,
+  isoDate,
+  isoMonth,
+  isoWeekLabel,
+} from '@taskpaper/core';
 import type {
   CalendarScope,
   SourcedCalendarModel,
@@ -219,16 +225,15 @@ export class CalendarPane {
     };
   }
 
-  /** The colored-dot class for an occurrence (overdue wins over plain due). */
-  private roleClass(occ: SourcedOccurrence, todayStr: string): string {
-    if (occ.role === 'due' && occ.date < todayStr) {
+  /** The colored-dot class for one role (overdue wins over plain due). */
+  private roleClass(role: CalendarRole, occ: SourcedOccurrence, todayStr: string): string {
+    if (role === 'due' && occ.date < todayStr) {
       return 'tp-cal-dot-overdue';
     }
-    return `tp-cal-dot-${occ.role}`;
+    return `tp-cal-dot-${role}`;
   }
 
-  /** A clickable occurrence row: colored dot + tag-stripped title (+ a dim
-   *  file badge when the occurrence comes from another document). */
+  /** A clickable occurrence row: role dots + optional time + plain title. */
   private renderOccurrence(
     parent: HTMLElement,
     occ: SourcedOccurrence,
@@ -237,9 +242,19 @@ export class CalendarPane {
   ): void {
     const el = parent.createDiv({
       cls: 'tp-cal-occ',
-      attr: { 'data-line': occ.line, 'data-path': occ.source.path, draggable: 'true' },
+      attr: {
+        'data-line': occ.line,
+        'data-path': occ.source.path,
+        'data-roles': occ.roles.join(','),
+        draggable: 'true',
+      },
     });
-    el.createSpan({ cls: `tp-cal-dot ${this.roleClass(occ, todayStr)}` });
+    for (const role of occ.roles) {
+      el.createSpan({ cls: `tp-cal-dot ${this.roleClass(role, occ, todayStr)}` });
+    }
+    if (occ.time) {
+      el.createSpan({ cls: 'tp-cal-occ-time', text: occ.time });
+    }
     el.createSpan({ cls: 'tp-cal-occ-text', text: occ.text || '(空白項目)' });
     if (occ.badge) {
       el.createSpan({ cls: 'tp-cal-occ-badge', text: occ.badge });
@@ -247,7 +262,8 @@ export class CalendarPane {
     if (breadcrumb) {
       el.createSpan({ cls: 'tp-cal-occ-path', text: breadcrumb });
     }
-    el.setAttr('title', occ.projectPath ? `${occ.text} — ${occ.projectPath}` : occ.text);
+    const title = occ.time ? `${occ.time} ${occ.text}` : occ.text;
+    el.setAttr('title', occ.projectPath ? `${title} — ${occ.projectPath}` : title);
     el.onclick = () => this.host.openOccurrence(occ);
     el.addEventListener('dragstart', (e: DragEvent) => {
       this.dragOcc = occ;
