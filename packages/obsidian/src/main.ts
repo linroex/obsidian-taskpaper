@@ -5,7 +5,12 @@ import { TaskPaperSidebarView, VIEW_TYPE_SIDEBAR } from './sidebar';
 import { TaskPaperCommands } from './commands';
 import { outlineOf } from './editor/outline';
 import { TaskpaperLinesCache } from './calendarSources';
-import { DEFAULT_SETTINGS, TaskPaperSettings, TaskPaperSettingTab } from './settings';
+import {
+  DEFAULT_SETTINGS,
+  localizedDefaultSearches,
+  TaskPaperSettings,
+  TaskPaperSettingTab,
+} from './settings';
 
 export default class TaskPaperPlugin extends Plugin {
   settings!: TaskPaperSettings;
@@ -344,10 +349,13 @@ export default class TaskPaperPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const stored = (await this.loadData()) as Partial<TaskPaperSettings> | null;
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
     this.settings.sidebarCollapsed = [...this.settings.sidebarCollapsed];
     // Deep-copy the array so edits never mutate the shared DEFAULT_SETTINGS.
-    this.settings.globalSearches = this.settings.globalSearches.map((s) => ({ ...s }));
+    this.settings.globalSearches = stored?.globalSearches
+      ? stored.globalSearches.map((s) => ({ ...s }))
+      : localizedDefaultSearches();
   }
 
   async saveSettings(): Promise<void> {

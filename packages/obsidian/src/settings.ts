@@ -2,6 +2,7 @@ import { App, PluginSettingTab, Setting } from 'obsidian';
 import type { CalendarScope } from './calendarSources';
 import type { GlobalSearch } from './sidebarLogic';
 import type TaskPaperPlugin from './main';
+import { t, type TranslationKey } from './i18n';
 
 export interface TaskPaperSettings {
   doneIncludesTime: boolean;
@@ -53,6 +54,14 @@ export const DEFAULT_SETTINGS: TaskPaperSettings = {
   calendarScope: 'file',
 };
 
+/** Localized defaults for a new vault; saved names remain user-editable data. */
+export function localizedDefaultSearches(language?: string): GlobalSearch[] {
+  return [
+    { name: t('defaultTodaySearch', language), query: '@today' },
+    { name: t('defaultNotDoneSearch', language), query: 'not @done' },
+  ];
+}
+
 export class TaskPaperSettingTab extends PluginSettingTab {
   constructor(app: App, private plugin: TaskPaperPlugin) {
     super(app, plugin);
@@ -61,10 +70,11 @@ export class TaskPaperSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
+    const text = (key: TranslationKey) => t(key);
 
     new Setting(containerEl)
-      .setName('Stamp @done with time')
-      .setDesc('Include the time (HH:mm) alongside the date when marking items done.')
+      .setName(text('doneTimeName'))
+      .setDesc(text('doneTimeDesc'))
       .addToggle((t) =>
         t.setValue(this.plugin.settings.doneIncludesTime).onChange(async (v) => {
           this.plugin.settings.doneIncludesTime = v;
@@ -73,8 +83,8 @@ export class TaskPaperSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Archive project name')
-      .setDesc('The project that "Archive Done Items" collects completed tasks into.')
+      .setName(text('archiveName'))
+      .setDesc(text('archiveDesc'))
       .addText((t) =>
         t.setValue(this.plugin.settings.archiveProjectName).onChange(async (v) => {
           this.plugin.settings.archiveProjectName = v.trim() || 'Archive';
@@ -83,8 +93,8 @@ export class TaskPaperSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('封存時加上 @project 標籤')
-      .setDesc('封存時以 @project(...) 記錄項目原本所屬的完整專案路徑（例如 @project(2026 Goals / Work)）。')
+      .setName(text('archiveProjectTagName'))
+      .setDesc(text('archiveProjectTagDesc'))
       .addToggle((t) =>
         t.setValue(this.plugin.settings.addProjectTagWhenArchiving).onChange(async (v) => {
           this.plugin.settings.addProjectTagWhenArchiving = v;
@@ -93,8 +103,8 @@ export class TaskPaperSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('封存時移除多餘標籤')
-      .setDesc('封存時移除 @done 與 @project 以外的所有標籤。')
+      .setName(text('archiveRemoveTagsName'))
+      .setDesc(text('archiveRemoveTagsDesc'))
       .addToggle((t) =>
         t.setValue(this.plugin.settings.removeExtraTagsWhenArchiving).onChange(async (v) => {
           this.plugin.settings.removeExtraTagsWhenArchiving = v;
@@ -103,8 +113,8 @@ export class TaskPaperSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Strike through done items')
-      .setDesc('Show completed (@done) items dimmed with a strikethrough.')
+      .setName(text('strikeDoneName'))
+      .setDesc(text('strikeDoneDesc'))
       .addToggle((t) =>
         t.setValue(this.plugin.settings.strikeDoneItems).onChange(async (v) => {
           this.plugin.settings.strikeDoneItems = v;
@@ -114,8 +124,8 @@ export class TaskPaperSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Filter hides non-matching lines')
-      .setDesc('When filtering, hide non-matching lines entirely. Turn off to dim them instead.')
+      .setName(text('filterHideName'))
+      .setDesc(text('filterHideDesc'))
       .addToggle((t) =>
         t.setValue(this.plugin.settings.filterHidesInsteadOfDims).onChange(async (v) => {
           this.plugin.settings.filterHidesInsteadOfDims = v;
@@ -124,8 +134,8 @@ export class TaskPaperSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('行事曆：顯示週數')
-      .setDesc('月曆格左側顯示 ISO 週數標籤（例如 W627 = 2026 年第 27 週）。')
+      .setName(text('calendarWeekNumbersName'))
+      .setDesc(text('calendarWeekNumbersDesc'))
       .addToggle((t) =>
         t.setValue(this.plugin.settings.calendarShowWeekNumbers).onChange(async (v) => {
           this.plugin.settings.calendarShowWeekNumbers = v;
@@ -135,12 +145,12 @@ export class TaskPaperSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('行事曆：每週起始日')
-      .setDesc('行事曆檢視的一週從哪一天開始。')
+      .setName(text('calendarWeekStartName'))
+      .setDesc(text('calendarWeekStartDesc'))
       .addDropdown((d) =>
         d
-          .addOption('1', '週一')
-          .addOption('0', '週日')
+          .addOption('1', text('monday'))
+          .addOption('0', text('sunday'))
           .setValue(String(this.plugin.settings.calendarWeekStart))
           .onChange(async (v) => {
             this.plugin.settings.calendarWeekStart = Number(v);
@@ -150,12 +160,12 @@ export class TaskPaperSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('行事曆：範圍')
-      .setDesc('顯示本檔或 vault 內所有 .taskpaper 檔案的排程項目（行事曆工具列可隨時切換）。')
+      .setName(text('calendarScopeName'))
+      .setDesc(text('calendarScopeDesc'))
       .addDropdown((d) =>
         d
-          .addOption('file', '本檔')
-          .addOption('vault', '全部')
+          .addOption('file', text('currentFile'))
+          .addOption('vault', text('allFiles'))
           .setValue(this.plugin.settings.calendarScope)
           .onChange(async (v) => {
             this.plugin.settings.calendarScope = v === 'vault' ? 'vault' : 'file';
@@ -165,8 +175,8 @@ export class TaskPaperSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('快速新增：收件匣檔案')
-      .setDesc('「快速新增任務」寫入的 .taskpaper 檔案路徑（相對於 vault 根目錄），不存在時會自動建立。')
+      .setName(text('inboxFileName'))
+      .setDesc(text('inboxFileDesc'))
       .addText((t) =>
         t
           .setPlaceholder('Inbox.taskpaper')
@@ -178,11 +188,11 @@ export class TaskPaperSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('快速新增：目標專案')
-      .setDesc('任務加入的專案路徑（例如 Work/收件匣）。留空表示加到文件末尾；專案不存在時會自動建立。')
+      .setName(text('inboxProjectName'))
+      .setDesc(text('inboxProjectDesc'))
       .addText((t) =>
         t
-          .setPlaceholder('Work/收件匣')
+          .setPlaceholder(text('inboxProjectPlaceholder'))
           .setValue(this.plugin.settings.inboxProject)
           .onChange(async (v) => {
             this.plugin.settings.inboxProject = v.trim();
@@ -196,9 +206,10 @@ export class TaskPaperSettingTab extends PluginSettingTab {
 
   /** 全域搜尋 — 顯示在所有文件側邊欄的儲存搜尋（對應 TaskPaper 的 searches.taskpaper）。 */
   private displayGlobalSearches(containerEl: HTMLElement): void {
+    const text = (key: TranslationKey) => t(key);
     new Setting(containerEl)
-      .setName('全域搜尋')
-      .setDesc('這些搜尋會顯示在每份文件的側邊欄 Searches 區段。')
+      .setName(text('globalSearchesName'))
+      .setDesc(text('globalSearchesDesc'))
       .setHeading();
 
     this.plugin.settings.globalSearches.forEach((search, index) => {
@@ -206,7 +217,7 @@ export class TaskPaperSettingTab extends PluginSettingTab {
         .setClass('tp-setting-global-search')
         .addText((t) =>
           t
-            .setPlaceholder('名稱')
+            .setPlaceholder(text('searchNamePlaceholder'))
             .setValue(search.name)
             .onChange(async (v) => {
               search.name = v;
@@ -216,7 +227,7 @@ export class TaskPaperSettingTab extends PluginSettingTab {
         )
         .addText((t) =>
           t
-            .setPlaceholder('查詢（例如 @today）')
+            .setPlaceholder(text('searchQueryPlaceholder'))
             .setValue(search.query)
             .onChange(async (v) => {
               search.query = v;
@@ -227,7 +238,7 @@ export class TaskPaperSettingTab extends PluginSettingTab {
         .addExtraButton((b) =>
           b
             .setIcon('trash')
-            .setTooltip('刪除')
+            .setTooltip(text('delete'))
             .onClick(async () => {
               this.plugin.settings.globalSearches.splice(index, 1);
               await this.plugin.saveSettings();
@@ -238,7 +249,7 @@ export class TaskPaperSettingTab extends PluginSettingTab {
     });
 
     new Setting(containerEl).addButton((b) =>
-      b.setButtonText('新增搜尋').onClick(async () => {
+      b.setButtonText(text('addSearch')).onClick(async () => {
         this.plugin.settings.globalSearches.push({ name: '', query: '' });
         await this.plugin.saveSettings();
         this.plugin.refreshSidebar();
@@ -249,11 +260,12 @@ export class TaskPaperSettingTab extends PluginSettingTab {
 
   /** 標籤顯示清單 — 對應 TaskPaper 的 tags.taskpaper（Include Tags / Exclude Tags）。 */
   private displayTagLists(containerEl: HTMLElement): void {
-    new Setting(containerEl).setName('側邊欄標籤').setHeading();
+    const text = (key: TranslationKey) => t(key);
+    new Setting(containerEl).setName(text('sidebarTagsName')).setHeading();
 
     new Setting(containerEl)
-      .setName('一律顯示的標籤')
-      .setDesc('以空白或逗號分隔（可加 @）。留空表示顯示文件中找到的所有標籤；列出的標籤即使數量為 0 也會顯示。')
+      .setName(text('includeTagsName'))
+      .setDesc(text('includeTagsDesc'))
       .addText((t) =>
         t
           .setPlaceholder('@at @due @start @today @done')
@@ -266,8 +278,8 @@ export class TaskPaperSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('排除的標籤')
-      .setDesc('以空白或逗號分隔（可加 @）。這些標籤永遠不會出現在側邊欄。')
+      .setName(text('excludeTagsName'))
+      .setDesc(text('excludeTagsDesc'))
       .addText((t) =>
         t
           .setPlaceholder('@search')

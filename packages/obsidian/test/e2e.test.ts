@@ -27,8 +27,14 @@ import { foldedRanges } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
 import { advanceDate, todayStamp } from '@taskpaper/core';
 import { App, Menu, Notice, setIcon, TFile } from 'obsidian';
+import * as Obsidian from 'obsidian';
 import { filterSpecField, setFilterEffect } from '../src/editor/filter';
 import { refreshLinks } from '../src/editor/links';
+import {
+  DEFAULT_SETTINGS,
+  localizedDefaultSearches,
+  TaskPaperSettingTab,
+} from '../src/settings';
 
 let pass = 0;
 let fail = 0;
@@ -56,6 +62,73 @@ function foldCount(view: EditorView): number {
 function activeQuery(view: EditorView): string | null {
   const spec = view.state.field(filterSpecField, false) ?? null;
   return spec && spec.mode === 'query' ? spec.query : null;
+}
+
+// --- settings follow Obsidian's language, with English fallback ---
+{
+  const setLanguage = (Obsidian as unknown as {
+    __setLanguageForTests(language: string): void;
+  }).__setLanguageForTests;
+  const renderSettings = (language: string): TaskPaperSettingTab => {
+    setLanguage(language);
+    const plugin = {
+      settings: {
+        ...DEFAULT_SETTINGS,
+        sidebarCollapsed: [],
+        globalSearches: localizedDefaultSearches(language),
+      },
+      saveSettings: async () => {},
+      applyBodyClasses: () => {},
+      refreshSidebar: () => {},
+    };
+    const tab = new TaskPaperSettingTab(new App(), plugin as never);
+    tab.display();
+    return tab;
+  };
+
+  const chineseTab = renderSettings('zh-TW');
+  const chineseText = chineseTab.containerEl.textContent ?? '';
+  for (const title of [
+    '@done 加上完成時間',
+    '封存專案名稱',
+    '已完成項目加上刪除線',
+    '篩選時隱藏不符合的行',
+    '行事曆：顯示週數',
+    '快速新增：收件匣檔案',
+    '全域搜尋',
+    '側邊欄標籤',
+  ]) {
+    check(`settings title is localized to Chinese: ${title}`, chineseText.includes(title));
+  }
+  check(
+    'English settings copy is absent in Chinese',
+    !/Stamp @done|Archive project name|Strike through done|Filter hides|Searches section|vault root/i.test(chineseText),
+  );
+  const inputValues = Array.from(
+    chineseTab.containerEl.querySelectorAll<HTMLInputElement>('input'),
+  ).map((input) => input.value);
+  check(
+    'new-vault global-search names are localized to Chinese',
+    inputValues.includes('今日') && inputValues.includes('未完成'),
+  );
+  check(
+    'the zh locale also selects Chinese',
+    (renderSettings('zh').containerEl.textContent ?? '').includes('@done 加上完成時間'),
+  );
+
+  const englishText = renderSettings('en').containerEl.textContent ?? '';
+  check(
+    'English settings render when Obsidian uses English',
+    englishText.includes('Stamp @done with time') &&
+      englishText.includes('Archive project name') &&
+      englishText.includes('Global searches') &&
+      englishText.includes('Sidebar tags'),
+  );
+  check(
+    'unsupported Obsidian languages fall back to English',
+    (renderSettings('fr').containerEl.textContent ?? '').includes('Stamp @done with time'),
+  );
+  setLanguage('en');
 }
 
 // Inbox(1) / -alpha @today(2) / -beta @waiting(bob)(3) / Work(4) / -gamma(5) / -delta(6)

@@ -63,6 +63,8 @@ Project:
   `@tag(value)` on it (a tag name row adds the bare tag) — reclassify a reading list by
   dragging books between `@想看` / `@想買` values without touching the text.
 - **Recurring tasks**: `@repeat(1w)` and friends — see 重複任務 below.
+- **Settings localization**: follows Obsidian's configured interface language;
+  Traditional Chinese and English are included, with English as the fallback.
 
 ## Query language
 
@@ -121,16 +123,16 @@ Enable **TaskPaper** under Settings → Community plugins, then open any `.taskp
 
 ## Settings
 
-| Setting | Default | Description |
+| 設定 | 預設值 | 說明 |
 | --- | --- | --- |
-| Stamp @done with time | off | Include `HH:mm` with the date when marking done |
-| Archive project name | `Archive` | Project that Archive Done Items collects into |
-| Strike through done items | on | Dim + strike completed items |
-| Filter hides non-matching lines | on | Hide (vs. dim) non-matches when filtering |
-| 行事曆：每週起始日 | 週一 | Calendar weeks start Monday or Sunday |
-| 行事曆：顯示週數 | on | `W627`-style ISO week labels in the month grid |
-| 行事曆：範圍 | 本檔 | Calendar aggregates the current file or every `.taskpaper` file |
-| 快速新增：收件匣檔案 / 目標專案 | `Inbox.taskpaper` | Where 快速新增任務 appends captured tasks |
+| @done 加上完成時間 | 關 | 將項目標記為完成時，在日期後加上 `HH:mm` |
+| 封存專案名稱 | `Archive` | 「封存已完成項目」收集完成任務的專案 |
+| 已完成項目加上刪除線 | 開 | 淡化並加上刪除線，包括完成任務的子項目 |
+| 篩選時隱藏不符合的行 | 開 | 完全隱藏不符合的行；關閉後則改為淡化 |
+| 行事曆：每週起始日 | 週一 | 一週從週一或週日開始 |
+| 行事曆：顯示週數 | 開 | 在月曆格左側顯示 `W627` 格式的 ISO 週數 |
+| 行事曆：範圍 | 本檔 | 彙整目前檔案或儲存庫內所有 `.taskpaper` 檔案 |
+| 快速新增：收件匣檔案／目標專案 | `Inbox.taskpaper` | 「快速新增任務」寫入的位置 |
 
 ## License
 

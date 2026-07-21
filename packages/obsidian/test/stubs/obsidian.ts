@@ -519,6 +519,16 @@ export class FuzzySuggestModal<T> extends SuggestModal<FuzzyMatch<T>> {
 // Settings
 // ---------------------------------------------------------------------------
 
+let appLanguage = 'en';
+
+export function getLanguage(): string {
+  return appLanguage;
+}
+
+export function __setLanguageForTests(language: string): void {
+  appLanguage = language;
+}
+
 export class Plugin extends Component {
   app = new App();
   settingTabs: PluginSettingTab[] = [];
@@ -606,6 +616,28 @@ export class ToggleComponent extends ValueComponent<boolean> {
   }
 }
 
+export class DropdownComponent extends ValueComponent<string> {
+  selectEl: HTMLSelectElement;
+
+  constructor(containerEl: HTMLElement) {
+    super();
+    this.selectEl = containerEl.ownerDocument.createElement('select');
+    containerEl.appendChild(this.selectEl);
+    this.selectEl.addEventListener('change', () => void this.onChangeCb?.(this.selectEl.value));
+  }
+  addOption(value: string, display: string): this {
+    const option = this.selectEl.ownerDocument.createElement('option');
+    option.value = value;
+    option.textContent = display;
+    this.selectEl.appendChild(option);
+    return this;
+  }
+  setValue(value: string): this {
+    this.selectEl.value = value;
+    return this;
+  }
+}
+
 export class ButtonComponent {
   buttonEl: HTMLButtonElement;
 
@@ -670,6 +702,10 @@ export class Setting {
   }
   addToggle(cb: (toggle: ToggleComponent) => unknown): this {
     cb(new ToggleComponent());
+    return this;
+  }
+  addDropdown(cb: (dropdown: DropdownComponent) => unknown): this {
+    cb(new DropdownComponent(this.controlEl));
     return this;
   }
   addButton(cb: (button: ButtonComponent) => unknown): this {
