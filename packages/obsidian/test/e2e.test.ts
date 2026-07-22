@@ -417,6 +417,63 @@ function renderedLines(view: EditorView): HTMLElement[] {
   cleanup();
 }
 
+// --- editing a tag away under a filter keeps the line visible (sticky edit) ---
+{
+  const { view, cleanup } = mountEditor('Inbox:\n\t- alpha @today\n\t- hidden');
+  view.dispatch({
+    effects: setFilterEffect.of({ mode: 'query', query: '@today', hide: true }),
+    selection: { anchor: view.state.doc.line(2).to },
+  });
+
+  press(view, 'Backspace'); // "@today" -> "@toda": the line stops matching
+  check(
+    'editing the tag away keeps the line visible',
+    view.state.doc.line(2).text === '\t- alpha @toda' && !hiddenLineNumbers(view).has(2),
+    [...hiddenLineNumbers(view)].join(','),
+  );
+
+  view.dispatch({ selection: { anchor: view.state.doc.line(1).to } });
+  check(
+    'the edited line survives the cursor leaving it',
+    !hiddenLineNumbers(view).has(2),
+    [...hiddenLineNumbers(view)].join(','),
+  );
+
+  view.dispatch({
+    effects: setFilterEffect.of({ mode: 'query', query: '@today', hide: true }),
+  });
+  check(
+    're-applying the filter hides the no-longer-matching line',
+    hiddenLineNumbers(view).has(2),
+    [...hiddenLineNumbers(view)].join(','),
+  );
+  cleanup();
+}
+
+// --- completing a task under `not @done` keeps it visible until re-filter ---
+{
+  const { view, cleanup } = mountEditor(
+    ['Inbox:', '\t- alpha', '\t- done already @done(2026-01-01)'].join('\n'),
+  );
+  view.dispatch({
+    effects: setFilterEffect.of({ mode: 'query', query: 'not @done', hide: true }),
+  });
+  check('the completed task starts hidden', hiddenLineNumbers(view).has(3));
+
+  clickEl(findMark(view, 'tp-task-dash')[0]); // completes "- alpha"
+  check(
+    'dash-click completion stamps @done',
+    view.state.doc.line(2).text.includes('@done('),
+    view.state.doc.line(2).text,
+  );
+  check(
+    'the just-completed task stays visible under not @done',
+    !hiddenLineNumbers(view).has(2),
+    [...hiddenLineNumbers(view)].join(','),
+  );
+  cleanup();
+}
+
 // --- Enter at the end of a NOTE stays visible while a query filter is active ---
 {
   const { view, cleanup } = mountEditor(

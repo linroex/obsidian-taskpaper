@@ -79,11 +79,11 @@ export const filterSpecField = StateField.define<FilterSpec | null>({
 
 /**
  * Query filters normally hide a blank task immediately because it cannot match
- * yet. Remember every line the user created under the current filter so their
- * work stays on screen for the whole filter session — a freshly typed item
- * that does not (yet) match the query must not vanish the moment the cursor
- * leaves it. The set resets when the filter changes; positions deleted from
- * the document drop out on their own.
+ * yet. Remember every line the user created OR edited under the current filter
+ * so their work stays on screen for the whole filter session — a freshly typed
+ * item that does not (yet) match the query, or a matching item whose tag was
+ * just changed away, must not vanish mid-edit. The set resets when the filter
+ * changes; positions deleted from the document drop out on their own.
  */
 const revealedTaskField = StateField.define<readonly number[]>({
   create() {
@@ -102,9 +102,11 @@ const revealedTaskField = StateField.define<readonly number[]>({
       next = mapped;
     }
 
+    let filterChanged = false;
     for (const e of tr.effects) {
       if (e.is(setFilterEffect)) {
         next = [];
+        filterChanged = true;
       }
       if (e.is(revealNewTaskEffect)) {
         next = [...next, e.value];
@@ -115,6 +117,48 @@ const revealedTaskField = StateField.define<readonly number[]>({
     if (!spec || spec.mode !== 'query') {
       // Keep the empty-array identity stable so the deco field sees no change.
       return value.length === 0 ? value : [];
+    }
+
+    // Every line the user touches joins the set: typing, deleting, pasting,
+    // drag-drop and done-toggles ('toggle.done'). Programmatic operations
+    // (archive, outline moves, undo/redo) do not pin lines.
+    const userEdit =
+      tr.isUserEvent('input') ||
+      tr.isUserEvent('delete') ||
+      tr.isUserEvent('move') ||
+      tr.isUserEvent('toggle');
+    if (tr.docChanged && userEdit && !filterChanged) {
+      // Pre-change hidden runs: a change wholly inside one (e.g. a done-toggle
+      // on a selection spanning hidden lines) does not reveal those lines.
+      const hiddenBefore: { from: number; to: number }[] = [];
+      tr.startState
+        .field(filterDecoField, false)
+        ?.between(0, tr.startState.doc.length, (from, to) => {
+          if (to > from) {
+            hiddenBefore.push({ from, to });
+          }
+        });
+      const revealedLines = new Set<number>();
+      for (const pos of next) {
+        revealedLines.add(tr.state.doc.lineAt(Math.min(pos, tr.state.doc.length)).number);
+      }
+      const additions: number[] = [];
+      tr.changes.iterChanges((fromA, toA, fromB, toB) => {
+        if (hiddenBefore.some((h) => fromA >= h.from && toA <= h.to)) {
+          return;
+        }
+        const firstLine = tr.state.doc.lineAt(fromB).number;
+        const lastLine = tr.state.doc.lineAt(Math.min(toB, tr.state.doc.length)).number;
+        for (let n = firstLine; n <= lastLine; n++) {
+          if (!revealedLines.has(n)) {
+            revealedLines.add(n);
+            additions.push(tr.state.doc.line(n).from);
+          }
+        }
+      });
+      if (additions.length > 0) {
+        next = [...next, ...additions];
+      }
     }
     return next;
   },
