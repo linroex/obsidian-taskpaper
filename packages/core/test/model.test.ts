@@ -1,7 +1,7 @@
 import { buildOutline, filterContextItems, withDescendants } from '../src/model';
 import { runQuery } from '../src/query/evaluator';
 import { quoteQueryValue } from '../src/query/lexer';
-import { addTag, planAssignTag, removeTag, removeAllTags, hasTag, todayStamp, toggleDoneLine } from '../src/tags';
+import { addTag, planAssignTag, removeTag, removeAllTags, hasTag, stripTags, todayStamp, toggleDoneLine } from '../src/tags';
 import { parseDate, resolveDateExpression } from '../src/dates';
 import {
   moveItemUp,
@@ -793,6 +793,83 @@ check('move to non-project returns null', moveBranchToProject(mvDoc, 4, 1, 4) ==
   check('moveBranchBefore with a stale target line returns null', moveBranchBefore(dnd, 0, 99, 4) === null);
 }
 
+// --- tags are the TRAILING run only: emails, URLs and links never match ---
+{
+  const tagNames = (line: string) => [...buildOutline([line]).items[0].tags.keys()].join(',');
+
+  // Emails: never tags, anywhere on the line.
+  check('email in a task title is not a tag', tagNames('- mail bob@example.com about it') === '');
+  check('email in a note is not a tag', tagNames('write to alice@corp.co') === '');
+  check('email at the line end is not a tag', tagNames('- contact bob@example.com') === '');
+
+  // URLs and markdown links containing @.
+  check('@ inside a URL is not a tag', tagNames('- read https://social.example/@user') === '');
+  check(
+    '@ inside a markdown link is not a tag',
+    tagNames('- see [profile](https://social.example/@user)') === '',
+  );
+  check(
+    '@ inside a mailto link is not a tag',
+    tagNames('- write [bob](mailto:bob@example.com)') === '',
+  );
+
+  // Only the trailing run counts.
+  check('mid-title @mention is not a tag', tagNames('- ask @bob about the plan') === '');
+  check('trailing tag still parses', tagNames('- ask bob @today') === 'today');
+  check(
+    'a whole trailing run parses',
+    tagNames('- ship it @today @due(2026-08-01)') === 'today,due',
+  );
+  check(
+    'mid-line tag before more text is not a tag',
+    tagNames('- a @start(2026-08-01) then more words') === '',
+  );
+  check(
+    'link before a trailing tag keeps the tag',
+    tagNames('- see [x](https://ex.co/@user) @today') === 'today',
+  );
+  // ('.', '-', '_' stay legal INSIDE names, so '@today.' parses as the name
+  // "today." — unchanged historical charset; '!' is outside the charset.)
+  check('tag followed by punctuation is not a tag', tagNames('- done @today!') === '');
+  check('note-only tag line still parses', tagNames('\t@today') === 'today');
+
+  // stripTags / removeAllTags / removeTag respect the same rule.
+  check(
+    'stripTags keeps an email intact',
+    stripTags('- mail bob@example.com @today') === '- mail bob@example.com',
+    stripTags('- mail bob@example.com @today'),
+  );
+  check(
+    'stripTags keeps a linked URL intact',
+    stripTags('see [p](https://ex.co/@user)') === 'see [p](https://ex.co/@user)',
+  );
+  check(
+    'removeAllTags keeps mid-line @text',
+    removeAllTags('- ask @bob about it @today @flag') === '- ask @bob about it',
+    removeAllTags('- ask @bob about it @today @flag'),
+  );
+  check(
+    'removeTag only removes the trailing occurrence',
+    removeTag('- foo@bar.com @done(2026-01-01)', 'done') === '- foo@bar.com',
+    removeTag('- foo@bar.com @done(2026-01-01)', 'done'),
+  );
+  check(
+    'removeTag leaves a same-named mid-line token alone',
+    removeTag('- @done in title @done', 'done') === '- @done in title',
+    removeTag('- @done in title @done', 'done'),
+  );
+  check('hasTag is trailing-only', !hasTag('- @done mid text', 'done'));
+
+  // Queries see the same tag set.
+  const qOutline = buildOutline([
+    '- mail bob@example.com',
+    '- real thing @today',
+    '- see https://social.example/@today',
+  ]);
+  const matches = [...runQuery('@today', qOutline)].map((i) => i.line).join(',');
+  check('queries only match trailing tags', matches === '1', matches);
+}
+
 // --- removeAllTags ---
 // --- tag values map (sidebar value rows) + dash toggle ---
 {
@@ -1468,9 +1545,9 @@ check('toggle from none focuses', toggleFocusTarget(null, 3) === 3);
   // Value drop replaces an existing value IN PLACE (setTagValue semantics).
   check(
     'assign: value drop replaces in place',
-    planAssignTag(['- a @priority(low) tail'], [0], 'priority', 'high')[0].text ===
-      '- a @priority(high) tail',
-    JSON.stringify(planAssignTag(['- a @priority(low) tail'], [0], 'priority', 'high')),
+    planAssignTag(['- a tail @priority(low)'], [0], 'priority', 'high')[0].text ===
+      '- a tail @priority(high)',
+    JSON.stringify(planAssignTag(['- a tail @priority(low)'], [0], 'priority', 'high')),
   );
 
   // Name drop adds the bare tag; an already-present tag keeps its value.
@@ -1487,8 +1564,8 @@ check('toggle from none focuses', toggleFocusTarget(null, 3) === 3);
   // Duplicate same-name tags collapse to exactly one, on both drop kinds.
   check(
     'assign: value drop collapses duplicates',
-    planAssignTag(['- a @p(1) mid @p(2)'], [0], 'p', 'x')[0].text === '- a @p(x) mid',
-    JSON.stringify(planAssignTag(['- a @p(1) mid @p(2)'], [0], 'p', 'x')),
+    planAssignTag(['- a @p(1) @p(2)'], [0], 'p', 'x')[0].text === '- a @p(x)',
+    JSON.stringify(planAssignTag(['- a @p(1) @p(2)'], [0], 'p', 'x')),
   );
   check(
     'assign: name drop collapses duplicates keeping the first value',

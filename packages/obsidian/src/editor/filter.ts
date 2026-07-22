@@ -1,4 +1,12 @@
-import { EditorState, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state';
+import {
+  EditorSelection,
+  EditorState,
+  MapMode,
+  RangeSetBuilder,
+  StateEffect,
+  StateField,
+  Transaction,
+} from '@codemirror/state';
 import { Decoration, DecorationSet, EditorView } from '@codemirror/view';
 import { filterContextItems, runQuery } from '@taskpaper/core';
 import { outlineOf } from './outline';
@@ -71,33 +79,88 @@ export const filterSpecField = StateField.define<FilterSpec | null>({
 
 /**
  * Query filters normally hide a blank task immediately because it cannot match
- * yet. Remember its line until the cursor leaves so the user can finish typing
- * the task (and, usually, the tag that makes it match the active query).
+ * yet. Remember every line the user created OR edited under the current filter
+ * so their work stays on screen for the whole filter session — a freshly typed
+ * item that does not (yet) match the query, or a matching item whose tag was
+ * just changed away, must not vanish mid-edit. The set resets when the filter
+ * changes; positions deleted from the document drop out on their own.
  */
-const revealedTaskField = StateField.define<number | null>({
+const revealedTaskField = StateField.define<readonly number[]>({
   create() {
-    return null;
+    return [];
   },
   update(value, tr) {
-    let next = value === null ? null : tr.changes.mapPos(value, -1);
+    let next: readonly number[] = value;
+    if (tr.docChanged && value.length > 0) {
+      const mapped: number[] = [];
+      for (const pos of value) {
+        const m = tr.changes.mapPos(pos, -1, MapMode.TrackDel);
+        if (m !== null) {
+          mapped.push(m);
+        }
+      }
+      next = mapped;
+    }
 
+    let filterChanged = false;
     for (const e of tr.effects) {
       if (e.is(setFilterEffect)) {
-        next = null;
+        next = [];
+        filterChanged = true;
       }
       if (e.is(revealNewTaskEffect)) {
-        next = e.value;
+        next = [...next, e.value];
       }
     }
 
     const spec = tr.state.field(filterSpecField);
-    if (next === null || !spec || spec.mode !== 'query') {
-      return null;
+    if (!spec || spec.mode !== 'query') {
+      // Keep the empty-array identity stable so the deco field sees no change.
+      return value.length === 0 ? value : [];
     }
 
-    const pos = Math.min(next, tr.state.doc.length);
-    const cursorLine = tr.state.doc.lineAt(tr.state.selection.main.head).number;
-    return tr.state.doc.lineAt(pos).number === cursorLine ? pos : null;
+    // Every line the user touches joins the set: typing, deleting, pasting,
+    // drag-drop and done-toggles ('toggle.done'). Programmatic operations
+    // (archive, outline moves, undo/redo) do not pin lines.
+    const userEdit =
+      tr.isUserEvent('input') ||
+      tr.isUserEvent('delete') ||
+      tr.isUserEvent('move') ||
+      tr.isUserEvent('toggle');
+    if (tr.docChanged && userEdit && !filterChanged) {
+      // Pre-change hidden runs: a change wholly inside one (e.g. a done-toggle
+      // on a selection spanning hidden lines) does not reveal those lines.
+      const hiddenBefore: { from: number; to: number }[] = [];
+      tr.startState
+        .field(filterDecoField, false)
+        ?.between(0, tr.startState.doc.length, (from, to) => {
+          if (to > from) {
+            hiddenBefore.push({ from, to });
+          }
+        });
+      const revealedLines = new Set<number>();
+      for (const pos of next) {
+        revealedLines.add(tr.state.doc.lineAt(Math.min(pos, tr.state.doc.length)).number);
+      }
+      const additions: number[] = [];
+      tr.changes.iterChanges((fromA, toA, fromB, toB) => {
+        if (hiddenBefore.some((h) => fromA >= h.from && toA <= h.to)) {
+          return;
+        }
+        const firstLine = tr.state.doc.lineAt(fromB).number;
+        const lastLine = tr.state.doc.lineAt(Math.min(toB, tr.state.doc.length)).number;
+        for (let n = firstLine; n <= lastLine; n++) {
+          if (!revealedLines.has(n)) {
+            revealedLines.add(n);
+            additions.push(tr.state.doc.line(n).from);
+          }
+        }
+      });
+      if (additions.length > 0) {
+        next = [...next, ...additions];
+      }
+    }
+    return next;
   },
 });
 
@@ -123,8 +186,114 @@ export const filterDecoField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 });
 
+/**
+ * A hide filter renders non-matching lines as zero-height blocks, so two
+ * VISIBLE lines can be document-separated by hidden ones: Backspace at the
+ * start of a visible line would join it into a hidden line, a selection
+ * between visually adjacent lines silently spans (and deletes) everything
+ * hidden in between, and forward-Delete at a line end pulls a hidden line up.
+ * Trim user-initiated edits (typing, deleting, pasting, drag-drop) so they
+ * only ever remove visible text; the separator newlines on both sides of a
+ * hidden run are protected too, keeping hidden content on its own lines.
+ * Programmatic operations (archive, outline moves, undo) pass through.
+ */
+const protectHiddenEdits = EditorState.transactionFilter.of((tr) => {
+  if (!tr.docChanged) {
+    return tr;
+  }
+  if (!tr.isUserEvent('delete') && !tr.isUserEvent('input') && !tr.isUserEvent('move')) {
+    return tr;
+  }
+  const spec = tr.startState.field(filterSpecField, false);
+  if (!spec || !spec.hide) {
+    return tr;
+  }
+  // Hidden runs, each extended one position left to cover the newline that
+  // separates it from the visible line above.
+  const hidden: { from: number; to: number }[] = [];
+  tr.startState.field(filterDecoField).between(0, tr.startState.doc.length, (from, to) => {
+    if (to > from) {
+      hidden.push({ from: Math.max(0, from - 1), to });
+    }
+  });
+  if (hidden.length === 0) {
+    return tr;
+  }
+
+  let touched = false;
+  tr.changes.iterChanges((fromA, toA) => {
+    if (toA > fromA && hidden.some((h) => fromA < h.to && toA > h.from)) {
+      touched = true;
+    }
+  });
+  if (!touched) {
+    return tr;
+  }
+
+  const changes: { from: number; to?: number; insert?: string }[] = [];
+  tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+    if (inserted.length > 0) {
+      changes.push({ from: fromA, insert: inserted.toString() });
+    }
+    let pos = fromA;
+    for (const h of hidden) {
+      if (h.to <= pos || h.from >= toA) {
+        continue;
+      }
+      if (h.from > pos) {
+        changes.push({ from: pos, to: h.from });
+      }
+      pos = Math.max(pos, h.to);
+    }
+    if (pos < toA) {
+      changes.push({ from: pos, to: toA });
+    }
+  });
+  if (changes.length === 0) {
+    return []; // the whole edit targeted hidden text — cancel it
+  }
+
+  const changeSet = tr.startState.changes(changes);
+  const cursor = changeSet.mapPos(tr.startState.selection.main.from, 1);
+  const userEvent = tr.annotation(Transaction.userEvent);
+  return {
+    changes,
+    selection: EditorSelection.cursor(cursor),
+    effects: tr.effects,
+    annotations: userEvent ? Transaction.userEvent.of(userEvent) : undefined,
+    scrollIntoView: true,
+  };
+});
+
+/**
+ * Cursor motion treats hidden runs as atomic, so arrow keys hop across them
+ * instead of parking the cursor (and subsequent typing) inside invisible
+ * text. Each run is extended one position left over its separator newline:
+ * atomic skipping only moves positions strictly INSIDE a range, so without
+ * the extension the cursor could stop at a hidden line's start and type into
+ * it. Deletion is NOT left to the atomic-range machinery — it would delete a
+ * whole hidden run in one keypress; protectHiddenEdits above trims those
+ * edits instead (the two use the same extended spans, so they agree).
+ * Dim-mode line decorations are zero-length and never produce atoms.
+ */
+const hiddenAtomicRanges = EditorView.atomicRanges.of((view) => {
+  const builder = new RangeSetBuilder<Decoration>();
+  view.state.field(filterDecoField).between(0, view.state.doc.length, (from, to) => {
+    if (to > from) {
+      builder.add(Math.max(0, from - 1), to, hideBlock);
+    }
+  });
+  return builder.finish();
+});
+
 /** The fields, in dependency order (spec and temporary reveal before deco). */
-export const filterExtension = [filterSpecField, revealedTaskField, filterDecoField];
+export const filterExtension = [
+  filterSpecField,
+  revealedTaskField,
+  filterDecoField,
+  protectHiddenEdits,
+  hiddenAtomicRanges,
+];
 
 export function isFilterActive(state: EditorState): boolean {
   return state.field(filterSpecField, false) != null;
@@ -148,9 +317,8 @@ function buildFilterDeco(state: EditorState, spec: FilterSpec): DecorationSet {
     }
   }
 
-  const revealedTask = state.field(revealedTaskField);
-  if (revealedTask !== null) {
-    visible.add(state.doc.lineAt(Math.min(revealedTask, state.doc.length)).number - 1);
+  for (const revealed of state.field(revealedTaskField)) {
+    visible.add(state.doc.lineAt(Math.min(revealed, state.doc.length)).number - 1);
   }
 
   const builder = new RangeSetBuilder<Decoration>();

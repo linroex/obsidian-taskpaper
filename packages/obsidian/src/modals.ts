@@ -1,6 +1,7 @@
 import { App, FuzzySuggestModal, Modal, Notice } from 'obsidian';
 import { Item, parseQuery, resolveDateExpression } from '@taskpaper/core';
 import type { PaletteEntry } from './paletteEntries';
+import { filterHelpSections, filterHelpTitle } from './filterHelp';
 
 /** Prompts for a TaskPaper query. Calls onSubmit(query) or onSubmit(null) to clear. */
 export class QueryModal extends Modal {
@@ -460,5 +461,27 @@ export class ProjectSuggestModal extends FuzzySuggestModal<Item> {
 
   onChooseItem(item: Item): void {
     this.onChoose(item);
+  }
+}
+
+/** Reference sheet for the filter query language ("?" in the searchbar). */
+export class FilterHelpModal extends Modal {
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.addClass('tp-filter-help');
+    contentEl.createEl('h3', { text: filterHelpTitle() });
+    for (const section of filterHelpSections()) {
+      contentEl.createEl('h4', { text: section.title });
+      const table = contentEl.createEl('table', { cls: 'tp-filter-help-table' });
+      for (const row of section.rows) {
+        const tr = table.createEl('tr');
+        tr.createEl('td').createEl('code', { text: row.code });
+        tr.createEl('td', { text: row.desc });
+      }
+    }
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
   }
 }

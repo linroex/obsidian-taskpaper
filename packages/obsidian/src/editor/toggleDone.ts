@@ -38,7 +38,11 @@ export function toggleDoneAtLines(
   if (changes.length === 0) {
     return false;
   }
-  editor.dispatch({ changes });
+  // 'toggle.done' marks this as a user edit so an active query filter keeps
+  // the toggled line visible (e.g. completing a task under `not @done`),
+  // without entering the input/delete families the hidden-line edit
+  // protection rewrites.
+  editor.dispatch({ changes, userEvent: 'toggle.done' });
   return true;
 }
 

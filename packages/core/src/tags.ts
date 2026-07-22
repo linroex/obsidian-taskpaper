@@ -3,12 +3,23 @@
  *
  * A tag is `@name` optionally followed by a parenthesised value: `@name(value)`.
  * The value may contain escaped characters (`\)` etc.).
+ *
+ * Only the TRAILING run of a line counts as tags: scanning back from the end,
+ * whitespace-separated `@name(value)?` tokens until the first stretch of other
+ * text. An `@` glued to preceding text never starts a tag. So emails
+ * (a@b.com), URLs (…/@user) and markdown links ([x](mailto:a@b.c)) stay plain
+ * text wherever they appear, and an `@mention` in the middle of a title is
+ * part of the title, not metadata.
  */
 // Type-only import — repeat.ts imports back from this module at runtime.
 import type { LineChange } from './repeat';
 
-/** Global matcher for tags within a line. Group 1 = name, group 2 = raw value (or undefined). */
+/** Global matcher for tag-SHAPED tokens (no trailing-position check — use
+ *  parseTags for the semantic notion of a line's tags). */
 export const TAG_RE = /@([A-Za-z0-9._-]+)(?:\(((?:\\.|[^)\\])*)\))?/g;
+
+/** One trailing tag, anchored to the line end; scanned right-to-left. */
+const TRAILING_TAG_RE = /(^|\s)(@([A-Za-z0-9._-]+)(\(((?:\\.|[^)\\])*)\))?)[\t ]*$/;
 
 export interface ParsedTag {
   name: string;
@@ -19,18 +30,23 @@ export interface ParsedTag {
   end: number;
 }
 
-/** Parse every tag occurrence in a single line of text. */
+/** Parse the trailing tag run of a single line of text, in document order. */
 export function parseTags(lineText: string): ParsedTag[] {
   const tags: ParsedTag[] = [];
-  TAG_RE.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = TAG_RE.exec(lineText))) {
-    tags.push({
-      name: m[1],
-      value: m[2] === undefined ? undefined : unescapeValue(m[2]),
-      start: m.index,
-      end: m.index + m[0].length,
+  let end = lineText.length;
+  while (end > 0) {
+    const m = TRAILING_TAG_RE.exec(lineText.slice(0, end));
+    if (!m) {
+      break;
+    }
+    const start = m.index + m[1].length;
+    tags.unshift({
+      name: m[3],
+      value: m[5] === undefined ? undefined : unescapeValue(m[5]),
+      start,
+      end: start + m[2].length,
     });
+    end = start;
   }
   return tags;
 }
@@ -92,31 +108,40 @@ export function addTag(lineText: string, name: string, value?: string): string {
   return `${core}${sep}${formatTag(name, value)}${trailing}`;
 }
 
-/** Remove every occurrence of a tag from a line, tidying up whitespace. */
+/** Remove every trailing occurrence of a tag from a line, tidying whitespace. */
 export function removeTag(lineText: string, name: string): string {
   // Preserve leading indentation exactly; only operate on the body so that
   // nesting (tabs) and any intentional internal spacing are never disturbed.
   const indent = /^[\t ]*/.exec(lineText)?.[0] ?? '';
-  const body = lineText
-    .slice(indent.length)
-    .replace(new RegExp(`\\s*@${escapeRegExp(name)}(?:\\((?:\\\\.|[^)\\\\])*\\))?`, 'g'), '')
-    .replace(/^ +| +$/g, ''); // trim spaces only left at the ends by the removal
+  let out = lineText;
+  // Right-to-left removal keeps the earlier tags' offsets valid.
+  for (const t of [...parseTags(lineText)].reverse()) {
+    if (t.name !== name) {
+      continue;
+    }
+    let start = t.start;
+    while (start > indent.length && (out[start - 1] === ' ' || out[start - 1] === '\t')) {
+      start--;
+    }
+    out = out.slice(0, start) + out.slice(t.end);
+  }
+  const body = out.slice(indent.length).replace(/^ +| +$/g, '');
   return indent + body;
 }
 
-/** Strip every @tag from a line, tidying up whitespace but preserving indentation. */
+/** Strip the trailing tag run from a line, preserving indentation. */
 export function removeAllTags(lineText: string): string {
   const indent = /^[\t ]*/.exec(lineText)?.[0] ?? '';
-  const body = lineText
-    .slice(indent.length)
-    .replace(/\s*@[A-Za-z0-9._-]+(?:\((?:\\.|[^)\\])*\))?/g, '')
-    .replace(/^ +| +$/g, '');
+  const tags = parseTags(lineText);
+  const cut = tags.length === 0 ? lineText : lineText.slice(0, tags[0].start);
+  const body = cut.slice(indent.length).replace(/^ +| +$/g, '');
   return indent + body;
 }
 
-/** Display text minus its tags — for names, breadcrumbs and fingerprints. */
+/** Display text minus its trailing tags — for names, breadcrumbs, fingerprints. */
 export function stripTags(text: string): string {
-  return text.replace(/\s*@[A-Za-z0-9._-]+(\((?:\\.|[^)\\])*\))?/g, '').trim();
+  const tags = parseTags(text);
+  return (tags.length === 0 ? text : text.slice(0, tags[0].start)).trim();
 }
 
 /** Toggle @done on a line: remove it if present, else stamp it (dropping @today). */
@@ -136,10 +161,6 @@ export function setTagValue(lineText: string, name: string, value?: string): str
   const before = lineText.slice(0, existing.start);
   const after = lineText.slice(existing.end);
   return `${before}${formatTag(name, value)}${after}`;
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**

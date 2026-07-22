@@ -116,6 +116,51 @@
   background: var(--background-modifier-hover);
 }
 
+/* "?" at the right end of the searchbar — opens the filter syntax guide. */
+.tp-searchbar-help {
+  display: flex;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-s);
+  padding: 2px;
+}
+
+.tp-searchbar-help svg {
+  width: 14px;
+  height: 14px;
+}
+
+.tp-searchbar-help:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+/* Filter syntax guide modal. */
+.tp-filter-help h4 {
+  margin: 0.9em 0 0.3em;
+}
+
+.tp-filter-help-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.tp-filter-help-table td {
+  padding: 3px 8px 3px 0;
+  vertical-align: top;
+  border: none;
+}
+
+.tp-filter-help-table td:first-child {
+  white-space: nowrap;
+}
+
+.tp-filter-help-table code {
+  background: var(--background-primary-alt);
+  border-radius: var(--radius-s);
+  padding: 1px 5px;
+}
+
 .taskpaper-view .cm-content {
   padding: var(--size-4-4);
   caret-color: var(--text-normal);
@@ -130,21 +175,25 @@
   outline: none;
 }
 
-/* Cursor (CodeMirror draws its own caret, so give it a theme-aware colour). */
+/* Cursor (CodeMirror draws its own caret, so give it a theme-aware colour).
+ * !important: CodeMirror's runtime-injected base theme (`1.2px solid black`)
+ * loads after this sheet and would win the cascade tie — a black caret is
+ * invisible on dark themes. */
 .taskpaper-view .cm-cursor,
 .taskpaper-view .cm-cursor-primary,
 .taskpaper-view .cm-dropCursor {
-  border-left: 2px solid var(--text-normal);
+  border-left: 2px solid var(--text-normal) !important;
 }
 
-/* Text selection. */
+/* Text selection. drawSelection() paints .cm-selectionBackground layers (the
+ * native ::selection is forced transparent), and CodeMirror's base theme
+ * colours them with hardcoded LIGHT-palette values (#d7d4f0 focused, #d9d9d9
+ * blurred) behind a high-specificity selector — without !important the
+ * selection ignores Obsidian's theme entirely, on dark themes too. */
 .taskpaper-view .cm-selectionBackground,
+.taskpaper-view .cm-focused .cm-selectionBackground,
 .taskpaper-view .cm-content ::selection {
-  background-color: var(--text-selection);
-}
-
-.taskpaper-view .cm-focused .cm-selectionBackground {
-  background-color: var(--text-selection);
+  background-color: var(--text-selection) !important;
 }
 
 /* Active line for a bit of orientation. */
