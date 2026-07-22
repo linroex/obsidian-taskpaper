@@ -18,6 +18,7 @@
 import { clickEl, docText, hiddenLineNumbers } from './e2eHarness';
 import { WorkspaceLeaf } from 'obsidian';
 import { filterSpecField } from '../src/editor/filter';
+import { filterHelpSections, filterHelpTitle } from '../src/filterHelp';
 import { DEFAULT_SETTINGS } from '../src/settings';
 import { TaskPaperView } from '../src/view';
 import type TaskPaperPlugin from '../src/main';
@@ -222,6 +223,44 @@ const DOC = ['Inbox:', '\t- alpha @today', '\t- beta @waiting(bob)', 'Work:', '\
   check('clear() resets focusedLine', fx.view.focusedLine === null);
   check('clear() drops the filter', activeSpec(fx.view) === null);
   fx.cleanup();
+}
+
+// --- the searchbar "?" opens the filter syntax guide ---
+{
+  const fx = mountView(DOC);
+  const help = fx.view.contentEl.querySelector<HTMLElement>('.tp-searchbar-help');
+  check('searchbar renders the help button', help !== null);
+
+  help?.click();
+  const tables = document.querySelectorAll('.tp-filter-help-table');
+  check('clicking ? opens the syntax guide with sections', tables.length >= 4, String(tables.length));
+  const codes = Array.from(document.querySelectorAll('.tp-filter-help-table code')).map(
+    (el) => el.textContent ?? '',
+  );
+  check(
+    'the guide documents [d] date comparisons',
+    codes.some((c) => c.includes('<=[d] today')),
+    codes.join(' | '),
+  );
+  document.querySelectorAll('.tp-filter-help').forEach((el) => el.parentElement?.remove());
+  fx.cleanup();
+}
+
+// --- the guide's copy is localized (pure content check) ---
+{
+  const zh = filterHelpSections('zh-TW');
+  const en = filterHelpSections('en');
+  check('zh guide has sections', zh.length >= 4 && zh[0].title === '基本');
+  check('en guide has sections', en.length >= 4 && en[0].title === 'Basics');
+  check('zh and en cover the same number of sections', zh.length === en.length);
+  check(
+    'every row carries an example and a description',
+    [...zh, ...en].every((s) => s.rows.every((r) => r.code.length > 0 && r.desc.length > 0)),
+  );
+  check(
+    'titles are localized',
+    filterHelpTitle('zh-TW') === '篩選語法說明' && filterHelpTitle('en') === 'Filter syntax',
+  );
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -6,6 +6,8 @@ import { outlineOf } from './editor/outline';
 import { filterSpecField, searchbarText, setFilterEffect } from './editor/filter';
 import { createEditorExtensions } from './editor/setup';
 import { CalendarPane } from './calendarPane';
+import { filterHelpTitle } from './filterHelp';
+import { FilterHelpModal } from './modals';
 import { CalendarViewLike, createCalendarHost } from './calendarHost';
 import type { SidebarSelectionItem } from './sidebarLogic';
 import { refreshLinks, type LinkKind } from './editor/links';
@@ -239,6 +241,12 @@ export class TaskPaperView extends TextFileView {
     const close = this.searchbarEl.createSpan({ cls: 'tp-searchbar-close' });
     setIcon(close, 'x');
     close.onclick = () => this.clearSearchbar();
+    const help = this.searchbarEl.createSpan({
+      cls: 'tp-searchbar-help',
+      attr: { 'aria-label': filterHelpTitle() },
+    });
+    setIcon(help, 'circle-help');
+    help.onclick = () => new FilterHelpModal(this.app).open();
 
     this.searchInput.addEventListener('input', () => {
       const q = this.searchInput.value.trim();
