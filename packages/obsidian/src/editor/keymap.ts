@@ -64,6 +64,45 @@ const continueTask: KeyBinding = {
 };
 
 /**
+ * Enter on a non-task line (note, project) while a query filter is active.
+ * The default newline command would work, but the freshly created line cannot
+ * match the query yet, so the filter recomputes on the edit and hides it
+ * immediately — the cursor lands inside a hidden block and Enter appears to do
+ * nothing. Insert the same indent-keeping newline the default command produces
+ * and keep the new line revealed until the cursor leaves it, exactly like a
+ * new task created under a filter.
+ */
+const continueUnderFilter: KeyBinding = {
+  key: 'Enter',
+  run(view: EditorView): boolean {
+    const { state } = view;
+    const filter = state.field(filterSpecField, false);
+    // Focus filters map their positions over edits, so an insertion next to a
+    // visible line stays visible — only query filters swallow the new line.
+    if (filter?.mode !== 'query') {
+      return false;
+    }
+    const sel = state.selection.main;
+    if (!sel.empty) {
+      return false;
+    }
+    const line = state.doc.lineAt(sel.head);
+    if (lineKind(line.text) === 'task') {
+      return false; // continueTask handles tasks
+    }
+    const indent = /^[\t ]*/.exec(line.text)?.[0] ?? '';
+    const insert = `\n${indent}`;
+    view.dispatch({
+      changes: { from: sel.head, insert },
+      selection: { anchor: sel.head + insert.length },
+      effects: revealNewTaskEffect.of(sel.head + 1),
+      scrollIntoView: true,
+    });
+    return true;
+  },
+};
+
+/**
  * If Backspace at column `col` should do outline-aware deletion instead of
  * deleting one character, return the range to remove (offsets within the
  * line); otherwise null. Two stages: with the `- ` task marker right before
@@ -150,4 +189,9 @@ const plainNewline: KeyBinding = {
   },
 };
 
-export const taskpaperKeymap: KeyBinding[] = [continueTask, plainNewline, backspaceUnindent];
+export const taskpaperKeymap: KeyBinding[] = [
+  continueTask,
+  continueUnderFilter,
+  plainNewline,
+  backspaceUnindent,
+];

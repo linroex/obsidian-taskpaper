@@ -405,6 +405,85 @@ function renderedLines(view: EditorView): HTMLElement[] {
   cleanup();
 }
 
+// --- Enter at the end of a NOTE stays visible while a query filter is active ---
+{
+  const { view, cleanup } = mountEditor(
+    ['Inbox:', '\t- alpha @today', '\t\tnote of alpha', '\t- hidden'].join('\n'),
+  );
+  view.dispatch({
+    effects: setFilterEffect.of({ mode: 'query', query: '@today', hide: true }),
+    selection: { anchor: view.state.doc.line(3).to },
+  });
+
+  press(view, 'Enter');
+  check(
+    'filtered Enter on a note keeps the note indent on the new line',
+    view.state.doc.line(4).text === '\t\t',
+    JSON.stringify(docText(view)),
+  );
+  check(
+    'cursor sits on the new note line, not swallowed by the filter',
+    view.state.doc.lineAt(view.state.selection.main.head).number === 4 &&
+      !hiddenLineNumbers(view).has(4),
+    [...hiddenLineNumbers(view)].join(','),
+  );
+
+  type(view, 'second line');
+  check(
+    'typing continues the note under the active filter',
+    view.state.doc.line(4).text === '\t\tsecond line' && !hiddenLineNumbers(view).has(4),
+    JSON.stringify(docText(view)),
+  );
+
+  // The continuation is an attached note of the matching task, so it stays
+  // visible even after the cursor leaves it.
+  view.dispatch({ selection: { anchor: view.state.doc.line(2).to } });
+  check(
+    'the note continuation stays visible after the cursor leaves',
+    !hiddenLineNumbers(view).has(4),
+    [...hiddenLineNumbers(view)].join(','),
+  );
+  cleanup();
+}
+
+// --- Enter mid-note splits it without the tail disappearing under the filter ---
+{
+  const { view, cleanup } = mountEditor(
+    ['Inbox:', '\t- alpha @today', '\t\tfirst second'].join('\n'),
+  );
+  const noteLine = view.state.doc.line(3);
+  view.dispatch({
+    effects: setFilterEffect.of({ mode: 'query', query: '@today', hide: true }),
+    selection: { anchor: noteLine.from + '\t\tfirst'.length },
+  });
+
+  press(view, 'Enter');
+  check(
+    'filtered mid-note Enter splits the note keeping the indent',
+    docText(view) === ['Inbox:', '\t- alpha @today', '\t\tfirst', '\t\t second'].join('\n'),
+    JSON.stringify(docText(view)),
+  );
+  check(
+    'both note halves stay visible under the filter',
+    !hiddenLineNumbers(view).has(3) && !hiddenLineNumbers(view).has(4),
+    [...hiddenLineNumbers(view)].join(','),
+  );
+  cleanup();
+}
+
+// --- without a filter, Enter on a note still uses the default newline ---
+{
+  const { view, cleanup } = mountEditor('\t- alpha\n\t\tnote');
+  view.dispatch({ selection: { anchor: view.state.doc.length } });
+  press(view, 'Enter');
+  check(
+    'unfiltered Enter on a note keeps default behavior',
+    docText(view) === '\t- alpha\n\t\tnote\n\t\t',
+    JSON.stringify(docText(view)),
+  );
+  cleanup();
+}
+
 // --- Enter also creates a visible task inside a project-focus filter ---
 {
   const { view, cleanup } = mountEditor(
