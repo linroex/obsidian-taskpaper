@@ -22,8 +22,9 @@ export type FilterSpec =
 export const setFilterEffect = StateEffect.define<FilterSpec | null>();
 
 /**
- * Temporarily keep one newly-created task visible while it is being edited.
- * The value is a document offset on the new line, in the post-change document.
+ * Temporarily keep one newly-created line (task or note) visible while it is
+ * being edited. The value is a document offset on the new line, in the
+ * post-change document.
  */
 export const revealNewTaskEffect = StateEffect.define<number>();
 
