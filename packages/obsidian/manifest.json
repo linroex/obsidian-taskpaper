@@ -1,7 +1,7 @@
 {
   "id": "taskpaper",
   "name": "TaskPaper",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "minAppVersion": "1.5.0",
   "description": "Plain-text task management in the TaskPaper format \u2014 projects, tasks, notes and tags \u2014 in dedicated .taskpaper files, with folding, a full query language, and true inline filtering.",
   "author": "TaskPaper for Obsidian contributors",
