@@ -1,4 +1,10 @@
-import { EditorState, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state';
+import {
+  EditorState,
+  MapMode,
+  RangeSetBuilder,
+  StateEffect,
+  StateField,
+} from '@codemirror/state';
 import { Decoration, DecorationSet, EditorView } from '@codemirror/view';
 import { filterContextItems, runQuery } from '@taskpaper/core';
 import { outlineOf } from './outline';
@@ -71,33 +77,44 @@ export const filterSpecField = StateField.define<FilterSpec | null>({
 
 /**
  * Query filters normally hide a blank task immediately because it cannot match
- * yet. Remember its line until the cursor leaves so the user can finish typing
- * the task (and, usually, the tag that makes it match the active query).
+ * yet. Remember every line the user created under the current filter so their
+ * work stays on screen for the whole filter session — a freshly typed item
+ * that does not (yet) match the query must not vanish the moment the cursor
+ * leaves it. The set resets when the filter changes; positions deleted from
+ * the document drop out on their own.
  */
-const revealedTaskField = StateField.define<number | null>({
+const revealedTaskField = StateField.define<readonly number[]>({
   create() {
-    return null;
+    return [];
   },
   update(value, tr) {
-    let next = value === null ? null : tr.changes.mapPos(value, -1);
+    let next: readonly number[] = value;
+    if (tr.docChanged && value.length > 0) {
+      const mapped: number[] = [];
+      for (const pos of value) {
+        const m = tr.changes.mapPos(pos, -1, MapMode.TrackDel);
+        if (m !== null) {
+          mapped.push(m);
+        }
+      }
+      next = mapped;
+    }
 
     for (const e of tr.effects) {
       if (e.is(setFilterEffect)) {
-        next = null;
+        next = [];
       }
       if (e.is(revealNewTaskEffect)) {
-        next = e.value;
+        next = [...next, e.value];
       }
     }
 
     const spec = tr.state.field(filterSpecField);
-    if (next === null || !spec || spec.mode !== 'query') {
-      return null;
+    if (!spec || spec.mode !== 'query') {
+      // Keep the empty-array identity stable so the deco field sees no change.
+      return value.length === 0 ? value : [];
     }
-
-    const pos = Math.min(next, tr.state.doc.length);
-    const cursorLine = tr.state.doc.lineAt(tr.state.selection.main.head).number;
-    return tr.state.doc.lineAt(pos).number === cursorLine ? pos : null;
+    return next;
   },
 });
 
@@ -148,9 +165,8 @@ function buildFilterDeco(state: EditorState, spec: FilterSpec): DecorationSet {
     }
   }
 
-  const revealedTask = state.field(revealedTaskField);
-  if (revealedTask !== null) {
-    visible.add(state.doc.lineAt(Math.min(revealedTask, state.doc.length)).number - 1);
+  for (const revealed of state.field(revealedTaskField)) {
+    visible.add(state.doc.lineAt(Math.min(revealed, state.doc.length)).number - 1);
   }
 
   const builder = new RangeSetBuilder<Decoration>();

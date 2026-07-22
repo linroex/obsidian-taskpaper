@@ -396,9 +396,21 @@ function renderedLines(view: EditorView): HTMLElement[] {
     JSON.stringify(docText(view)),
   );
 
+  // The user's freshly created task must survive the cursor leaving it —
+  // work done under a filter stays on screen for the whole filter session.
   view.dispatch({ selection: { anchor: view.state.doc.line(2).to } });
   check(
-    'an unfinished non-match hides after the cursor leaves',
+    'an unfinished non-match stays visible after the cursor leaves',
+    !hiddenLineNumbers(view).has(3),
+    [...hiddenLineNumbers(view)].join(','),
+  );
+
+  // Re-applying the filter starts a fresh session: unmatched leftovers hide.
+  view.dispatch({
+    effects: setFilterEffect.of({ mode: 'query', query: '@today', hide: true }),
+  });
+  check(
+    'a re-applied filter hides the unmatched leftover',
     hiddenLineNumbers(view).has(3),
     [...hiddenLineNumbers(view)].join(','),
   );
@@ -573,8 +585,8 @@ function renderedLines(view: EditorView): HTMLElement[] {
 
   view.dispatch({ selection: { anchor: view.state.doc.line(3).to } });
   check(
-    'non-matching child hides after leaving it when only its sibling matches',
-    hiddenLineNumbers(view).has(4),
+    'non-matching child stays visible after leaving it (sticky reveal)',
+    !hiddenLineNumbers(view).has(4),
     [...hiddenLineNumbers(view)].join(','),
   );
   cleanup();
