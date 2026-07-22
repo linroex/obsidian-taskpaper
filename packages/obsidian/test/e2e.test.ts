@@ -592,6 +592,113 @@ function renderedLines(view: EditorView): HTMLElement[] {
   cleanup();
 }
 
+// --- deleting under a hide filter must never touch hidden lines ---
+{
+  // V(1) V(2 match) H(3) H(4) V(5 match)
+  const DOC5 = ['Inbox:', '\t- alpha @today', '\t- hidden a', '\t\thidden note', '\t- beta @today'].join('\n');
+
+  // Backspace at the start of a visible line that follows a hidden run: the
+  // default join would merge the line into invisible text — must be a no-op.
+  {
+    const { view, cleanup } = mountEditor(DOC5);
+    view.dispatch({ effects: setFilterEffect.of({ mode: 'query', query: '@today', hide: true }) });
+    const before = docText(view);
+    view.dispatch({ selection: { anchor: view.state.doc.line(5).from } });
+    press(view, 'Backspace');
+    check(
+      'backspace at a hidden boundary deletes nothing',
+      docText(view) === before,
+      JSON.stringify(docText(view)),
+    );
+    cleanup();
+  }
+
+  // Forward-Delete at the end of a visible line before a hidden run would
+  // pull the first hidden line up into the visible one — must be a no-op.
+  {
+    const { view, cleanup } = mountEditor(DOC5);
+    view.dispatch({ effects: setFilterEffect.of({ mode: 'query', query: '@today', hide: true }) });
+    const before = docText(view);
+    view.dispatch({ selection: { anchor: view.state.doc.line(2).to } });
+    press(view, 'Delete');
+    check(
+      'forward-delete before a hidden run deletes nothing',
+      docText(view) === before,
+      JSON.stringify(docText(view)),
+    );
+    cleanup();
+  }
+
+  // A selection between two VISUALLY adjacent lines spans the hidden lines in
+  // between; deleting it must remove only the visible text.
+  {
+    const { view, cleanup } = mountEditor(DOC5);
+    view.dispatch({ effects: setFilterEffect.of({ mode: 'query', query: '@today', hide: true }) });
+    const l2 = view.state.doc.line(2);
+    const l5 = view.state.doc.line(5);
+    // From before " @today" on line 2 to after "- beta" on line 5.
+    view.dispatch({
+      selection: { anchor: l2.to - ' @today'.length, head: l5.from + '\t- beta'.length },
+    });
+    press(view, 'Backspace');
+    check(
+      'deleting across a hidden run keeps every hidden line intact',
+      docText(view) ===
+        ['Inbox:', '\t- alpha', '\t- hidden a', '\t\thidden note', ' @today'].join('\n'),
+      JSON.stringify(docText(view)),
+    );
+    cleanup();
+  }
+
+  // Typing over such a spanning selection replaces only the visible parts.
+  {
+    const { view, cleanup } = mountEditor(DOC5);
+    view.dispatch({ effects: setFilterEffect.of({ mode: 'query', query: '@today', hide: true }) });
+    const l2 = view.state.doc.line(2);
+    const l5 = view.state.doc.line(5);
+    view.dispatch({
+      selection: { anchor: l2.to - ' @today'.length, head: l5.from + '\t- beta'.length },
+    });
+    type(view, 'X');
+    check(
+      'typing over a spanning selection preserves hidden lines',
+      docText(view) ===
+        ['Inbox:', '\t- alphaX', '\t- hidden a', '\t\thidden note', ' @today'].join('\n'),
+      JSON.stringify(docText(view)),
+    );
+    cleanup();
+  }
+
+  // Horizontal cursor motion hops over the hidden run instead of stepping
+  // into invisible text (atomic ranges).
+  {
+    const { view, cleanup } = mountEditor(DOC5);
+    view.dispatch({ effects: setFilterEffect.of({ mode: 'query', query: '@today', hide: true }) });
+    view.dispatch({ selection: { anchor: view.state.doc.line(2).to } });
+    press(view, 'ArrowRight');
+    check(
+      'arrow-right hops across the hidden run to the next visible line',
+      view.state.selection.main.head === view.state.doc.line(5).from,
+      String(view.state.selection.main.head),
+    );
+    cleanup();
+  }
+
+  // Programmatic edits (archive, outline moves) still reach hidden lines.
+  {
+    const { view, cleanup } = mountEditor(DOC5);
+    view.dispatch({ effects: setFilterEffect.of({ mode: 'query', query: '@today', hide: true }) });
+    const l3 = view.state.doc.line(3);
+    view.dispatch({ changes: { from: l3.from, to: l3.to, insert: '\t- edited' } });
+    check(
+      'programmatic edits still reach hidden lines',
+      view.state.doc.line(3).text === '\t- edited',
+      JSON.stringify(docText(view)),
+    );
+    cleanup();
+  }
+}
+
 // --- append after nested descendants, before separators, preserving spaces ---
 {
   const { view, cleanup } = mountEditor(

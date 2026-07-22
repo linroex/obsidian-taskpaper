@@ -1,9 +1,11 @@
 import {
+  EditorSelection,
   EditorState,
   MapMode,
   RangeSetBuilder,
   StateEffect,
   StateField,
+  Transaction,
 } from '@codemirror/state';
 import { Decoration, DecorationSet, EditorView } from '@codemirror/view';
 import { filterContextItems, runQuery } from '@taskpaper/core';
@@ -140,8 +142,114 @@ export const filterDecoField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 });
 
+/**
+ * A hide filter renders non-matching lines as zero-height blocks, so two
+ * VISIBLE lines can be document-separated by hidden ones: Backspace at the
+ * start of a visible line would join it into a hidden line, a selection
+ * between visually adjacent lines silently spans (and deletes) everything
+ * hidden in between, and forward-Delete at a line end pulls a hidden line up.
+ * Trim user-initiated edits (typing, deleting, pasting, drag-drop) so they
+ * only ever remove visible text; the separator newlines on both sides of a
+ * hidden run are protected too, keeping hidden content on its own lines.
+ * Programmatic operations (archive, outline moves, undo) pass through.
+ */
+const protectHiddenEdits = EditorState.transactionFilter.of((tr) => {
+  if (!tr.docChanged) {
+    return tr;
+  }
+  if (!tr.isUserEvent('delete') && !tr.isUserEvent('input') && !tr.isUserEvent('move')) {
+    return tr;
+  }
+  const spec = tr.startState.field(filterSpecField, false);
+  if (!spec || !spec.hide) {
+    return tr;
+  }
+  // Hidden runs, each extended one position left to cover the newline that
+  // separates it from the visible line above.
+  const hidden: { from: number; to: number }[] = [];
+  tr.startState.field(filterDecoField).between(0, tr.startState.doc.length, (from, to) => {
+    if (to > from) {
+      hidden.push({ from: Math.max(0, from - 1), to });
+    }
+  });
+  if (hidden.length === 0) {
+    return tr;
+  }
+
+  let touched = false;
+  tr.changes.iterChanges((fromA, toA) => {
+    if (toA > fromA && hidden.some((h) => fromA < h.to && toA > h.from)) {
+      touched = true;
+    }
+  });
+  if (!touched) {
+    return tr;
+  }
+
+  const changes: { from: number; to?: number; insert?: string }[] = [];
+  tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+    if (inserted.length > 0) {
+      changes.push({ from: fromA, insert: inserted.toString() });
+    }
+    let pos = fromA;
+    for (const h of hidden) {
+      if (h.to <= pos || h.from >= toA) {
+        continue;
+      }
+      if (h.from > pos) {
+        changes.push({ from: pos, to: h.from });
+      }
+      pos = Math.max(pos, h.to);
+    }
+    if (pos < toA) {
+      changes.push({ from: pos, to: toA });
+    }
+  });
+  if (changes.length === 0) {
+    return []; // the whole edit targeted hidden text — cancel it
+  }
+
+  const changeSet = tr.startState.changes(changes);
+  const cursor = changeSet.mapPos(tr.startState.selection.main.from, 1);
+  const userEvent = tr.annotation(Transaction.userEvent);
+  return {
+    changes,
+    selection: EditorSelection.cursor(cursor),
+    effects: tr.effects,
+    annotations: userEvent ? Transaction.userEvent.of(userEvent) : undefined,
+    scrollIntoView: true,
+  };
+});
+
+/**
+ * Cursor motion treats hidden runs as atomic, so arrow keys hop across them
+ * instead of parking the cursor (and subsequent typing) inside invisible
+ * text. Each run is extended one position left over its separator newline:
+ * atomic skipping only moves positions strictly INSIDE a range, so without
+ * the extension the cursor could stop at a hidden line's start and type into
+ * it. Deletion is NOT left to the atomic-range machinery — it would delete a
+ * whole hidden run in one keypress; protectHiddenEdits above trims those
+ * edits instead (the two use the same extended spans, so they agree).
+ * Dim-mode line decorations are zero-length and never produce atoms.
+ */
+const hiddenAtomicRanges = EditorView.atomicRanges.of((view) => {
+  const builder = new RangeSetBuilder<Decoration>();
+  view.state.field(filterDecoField).between(0, view.state.doc.length, (from, to) => {
+    if (to > from) {
+      builder.add(Math.max(0, from - 1), to, hideBlock);
+    }
+  });
+  return builder.finish();
+});
+
 /** The fields, in dependency order (spec and temporary reveal before deco). */
-export const filterExtension = [filterSpecField, revealedTaskField, filterDecoField];
+export const filterExtension = [
+  filterSpecField,
+  revealedTaskField,
+  filterDecoField,
+  protectHiddenEdits,
+  hiddenAtomicRanges,
+];
 
 export function isFilterActive(state: EditorState): boolean {
   return state.field(filterSpecField, false) != null;
