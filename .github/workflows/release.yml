@@ -1,11 +1,17 @@
 name: Release
 
-# Pushing a version tag (v0.1.0) builds the Obsidian plugin and publishes a
-# GitHub Release with the three installable assets. Tests gate the release.
+# Two ways to cut a release:
+#  - Push a version tag (v0.3.0): builds the plugin and publishes a GitHub
+#    Release with the installable assets, as before. Tests gate the release.
+#  - Run this workflow manually (the "Run workflow" button, or via the API):
+#    it reads the version from manifest.json, creates the vX.Y.Z tag itself,
+#    then builds and publishes. This lets automation (e.g. a Claude session
+#    without tag-push permission) release with a single workflow dispatch.
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch: {}
 
 permissions:
   contents: write
@@ -30,25 +36,48 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Verify tag matches manifest version
+      - name: Resolve version
+        id: version
         run: |
           MANIFEST_VERSION=$(node -p "require('./packages/obsidian/manifest.json').version")
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          if [ "$MANIFEST_VERSION" != "$TAG_VERSION" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match manifest version $MANIFEST_VERSION" >&2
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="v$MANIFEST_VERSION"
+          else
+            TAG="$GITHUB_REF_NAME"
+            if [ "${TAG#v}" != "$MANIFEST_VERSION" ]; then
+              echo "Tag $TAG does not match manifest version $MANIFEST_VERSION" >&2
+              exit 1
+            fi
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      # Tags pushed with the workflow's own GITHUB_TOKEN do not re-trigger
+      # workflows, so a manual dispatch never causes a second (duplicate) run.
+      - name: Create tag (manual dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists — bump manifest.json first" >&2
             exit 1
           fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG"
+          git push origin "$TAG"
 
       - name: Package plugin folder
         run: |
+          TAG="${{ steps.version.outputs.tag }}"
           mkdir -p /tmp/pkg/taskpaper
           cp packages/obsidian/main.js packages/obsidian/manifest.json packages/obsidian/styles.css /tmp/pkg/taskpaper/
-          (cd /tmp/pkg && zip -r "taskpaper-${GITHUB_REF_NAME}.zip" taskpaper)
+          (cd /tmp/pkg && zip -r "taskpaper-${TAG}.zip" taskpaper)
 
       - name: Publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          TAG="${{ steps.version.outputs.tag }}"
           cat > /tmp/notes.md <<'NOTES'
           TaskPaper 純文字任務管理 for Obsidian — 專案／任務／筆記／@標籤、完整 TaskPaper 查詢語言、側欄（專案・標籤・儲存搜尋）、搜尋列、行事曆檢視（月曆格＋列表）、封存、拖曳整理。
 
@@ -68,11 +97,26 @@ jobs:
           1. 安裝 [BRAT](https://github.com/TfTHacker/obsidian42-brat) plugin
           2. 「Add beta plugin」填入 `linroex/obsidian-taskpaper`
           NOTES
-          gh release create "$GITHUB_REF_NAME" \
-            "/tmp/pkg/taskpaper-${GITHUB_REF_NAME}.zip" \
-            packages/obsidian/main.js \
-            packages/obsidian/manifest.json \
-            packages/obsidian/styles.css \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "TaskPaper for Obsidian $GITHUB_REF_NAME" \
-            --notes-file /tmp/notes.md
+          ASSETS=(
+            "/tmp/pkg/taskpaper-${TAG}.zip"
+            packages/obsidian/main.js
+            packages/obsidian/manifest.json
+            packages/obsidian/styles.css
+          )
+          # The GitHub web UI can only create a tag by publishing a release, so
+          # the tag may arrive with an empty release already attached. Fill that
+          # release in instead of failing on the duplicate name.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "TaskPaper for Obsidian $TAG" \
+              --notes-file /tmp/notes.md
+            gh release upload "$TAG" "${ASSETS[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$TAG" "${ASSETS[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "TaskPaper for Obsidian $TAG" \
+              --notes-file /tmp/notes.md
+          fi
