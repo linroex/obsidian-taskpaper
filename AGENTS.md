@@ -15,6 +15,11 @@ separate request.
 - Preserve the vault plugin directory's `data.json` and any other user data.
 - Verify the deployed files match the build artifacts, and report that Obsidian
   needs to reload the plugin/app before testing.
+- When running in a remote/web session that cannot reach the local vault path,
+  do not attempt to deploy. Instead, build as usual and send the built
+  `main.js`, `manifest.json`, and `styles.css` to the user to download (so they
+  can drop them into the plugin directory themselves), then note that the plugin
+  needs reloading.
 
 ## Git workflow
 
