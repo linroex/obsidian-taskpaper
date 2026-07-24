@@ -8,7 +8,7 @@ import { highlightPlugin } from './highlight';
 import { taskpaperFolding } from './folding';
 import { filterExtension, setFilterEffect } from './filter';
 import { escapeClearsFilter, taskpaperKeymap } from './keymap';
-import { applyOutlineOp } from './outlineEdit';
+import { applyMoveOp, applyOutlineOp } from './outlineEdit';
 import { tagClickExtension } from './tagClick';
 import { dashClickExtension } from './dashClick';
 import { indentGuides } from './guides';
@@ -62,13 +62,13 @@ export const outlineKeyBindings: KeyBinding[] = [
     key: 'Mod-Shift-ArrowUp',
     mac: 'Alt-ArrowUp',
     preventDefault: true,
-    run: (view) => (applyOutlineOp(view, moveItemUp), true),
+    run: (view) => (applyMoveOp(view, moveItemUp), true),
   },
   {
     key: 'Mod-Shift-ArrowDown',
     mac: 'Alt-ArrowDown',
     preventDefault: true,
-    run: (view) => (applyOutlineOp(view, moveItemDown), true),
+    run: (view) => (applyMoveOp(view, moveItemDown), true),
   },
   {
     key: 'Mod-Shift-ArrowRight',

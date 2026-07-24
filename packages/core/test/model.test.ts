@@ -529,16 +529,47 @@ check('query due > "yesterday 11pm"', qd('@due > "yesterday 11pm" [d]') === 1);
 check('query due < "2 weeks"', qd('@due < "2 weeks" [d]') === 1);
 
 // --- outline operations ---
+// moveItemUp/Down match TaskPaper's moveBranchesUp/Down: an item moves ONE ROW
+// in the displayed outline, adopting the neighbouring row's parent/level (see
+// BirchEditor/birch-editor.js _moveBranchesInDirection). Among flat siblings
+// that is a plain swap.
+const flat = ['A:', '\t- one', '\t- two', '\t- three'];
+const flatDown = moveItemDown(flat, 1, 4); // "one" down past "two"
+check('moveDown swaps flat siblings',
+  flatDown !== null && flatDown.lines[1] === '\t- two' && flatDown.lines[2] === '\t- one',
+  JSON.stringify(flatDown?.lines));
+const flatUp = moveItemUp(flat, 3, 4); // "three" up past "two"
+check('moveUp swaps flat siblings',
+  flatUp !== null && flatUp.lines[2] === '\t- three' && flatUp.lines[3] === '\t- two',
+  JSON.stringify(flatUp?.lines));
+
+// When the next row is a parent, moving DOWN descends INTO it (like TaskPaper:
+// five.firstChild == two after moving "two" down). Here "one" moves down and
+// becomes the first child of "two", before "two-child".
 const ol = ['A:', '\t- one', '\t- two', '\t\t- two-child', '\t- three'];
-const down = moveItemDown(ol, 1, 4); // move "- one" below "- two" (+ its child)
-check('moveDown swaps sibling block', down !== null && down.lines[1] === '\t- two' && down.lines[3] === '\t- one', JSON.stringify(down?.lines));
-const up = moveItemUp(ol, 4, 4); // move "- three" above "- two"
-check('moveUp swaps sibling block', up !== null && up.lines[1] === '\t- one' && up.lines[2] === '\t- three', JSON.stringify(up?.lines));
+const down = moveItemDown(ol, 1, 4);
+check('moveDown descends into the next parent',
+  down !== null && down.lines[1] === '\t- two' && down.lines[2] === '\t\t- one' && down.lines[3] === '\t\t- two-child',
+  JSON.stringify(down?.lines));
+// Moving "three" UP lands it before the previous displayed row ("two-child"),
+// so it becomes a child of "two".
+const up = moveItemUp(ol, 4, 4);
+check('moveUp climbs into the previous parent',
+  up !== null && up.lines[3] === '\t\t- three' && up.lines[4] === '\t\t- two-child',
+  JSON.stringify(up?.lines));
 const ind = indentItem(ol, 2, 4); // indent "- two" (and child)
 check('indent adds tab to subtree', ind !== null && ind.lines[2] === '\t\t- two' && ind.lines[3] === '\t\t\t- two-child', JSON.stringify(ind?.lines));
 const out = outdentItem(ol, 3, 4); // outdent "- two-child"
 check('outdent removes one tab', out !== null && out.lines[3] === '\t- two-child', JSON.stringify(out?.lines));
-check('moveUp first child returns null', moveItemUp(ol, 1, 4) === null);
+// The first child of a project climbs OUT above the project (its previous
+// displayed row is the project heading, at root level) — TaskPaper's behavior.
+const upOut = moveItemUp(ol, 1, 4);
+check('moveUp on the first child climbs out above the project',
+  upOut !== null && upOut.lines[0] === '- one' && upOut.lines[1] === 'A:',
+  JSON.stringify(upOut?.lines));
+// At the very top of the displayed outline there is nothing above — no-op.
+check('moveUp at the top returns null', moveItemUp(ol, 0, 4) === null);
+check('moveDown at the bottom returns null', moveItemDown(ol, 4, 4) === null);
 check('outdent at margin returns null', outdentItem(ol, 0, 4) === null);
 
 // --- single-item moves (only the item line moves; its subtree stays) ---
@@ -594,6 +625,55 @@ check(
   'outdentItemOnly trims up to tabSize spaces',
   outdentItemOnly(['A:', '      - spaced'], 1, 4)?.lines[1] === '  - spaced',
 );
+
+// --- moves restricted to the visible outline (a hide filter is active) ---
+// Under `not @done` only the two open tasks are on screen; the @done one is
+// hidden between them. Moving must reorder the DISPLAYED tasks, not swap with
+// the hidden sibling (which would look like nothing happened).
+const filt = ['Inbox:', '\t- one', '\t- two @done', '\t- three'];
+const visFilt = new Set([0, 1, 3]); // "two @done" (line 2) hidden
+
+// "one" is the first VISIBLE child; its previous displayed row is the "Inbox:"
+// heading, so (like TaskPaper) moving up climbs OUT above the project.
+const upOut2 = moveItemUp(filt, 1, 4, visFilt);
+check('moveItemUp on the first visible child climbs out above the project',
+  upOut2 !== null && upOut2.lines[0] === '- one' && upOut2.lines[1] === 'Inbox:',
+  JSON.stringify(upOut2?.lines));
+// The old bug: without the visible set, moving "three" up merely swaps it with
+// the hidden "two @done", so the on-screen order (one, three) is unchanged and
+// the move looks like a no-op.
+check('moveItemUp: without a filter it swaps with the hidden sibling',
+  moveItemUp(filt, 3, 4)?.lines[2] === '\t- three' &&
+    moveItemUp(filt, 3, 4)?.lines[3] === '\t- two @done');
+
+// "three" moves up over the hidden "two @done" to sit above "one".
+const upOverHidden = moveItemUp(filt, 3, 4, visFilt);
+check('moveItemUp steps over a hidden sibling',
+  upOverHidden !== null &&
+    upOverHidden.lines[1] === '\t- three' &&
+    upOverHidden.lines[2] === '\t- one' &&
+    upOverHidden.lines[3] === '\t- two @done' &&
+    upOverHidden.cursorLine === 1,
+  JSON.stringify(upOverHidden?.lines));
+
+// "one" moves down over the hidden "two @done" to sit below "three".
+const downOverHidden = moveItemDown(filt, 1, 4, visFilt);
+check('moveItemDown steps over a hidden sibling',
+  downOverHidden !== null &&
+    downOverHidden.lines[1] === '\t- two @done' &&
+    downOverHidden.lines[2] === '\t- three' &&
+    downOverHidden.lines[3] === '\t- one' &&
+    downOverHidden.cursorLine === 3,
+  JSON.stringify(downOverHidden?.lines));
+
+// "three" is the last VISIBLE sibling — it cannot move down.
+check('moveItemDown: last visible sibling returns null', moveItemDown(filt, 3, 4, visFilt) === null);
+
+// The single-line variants respect visibility too.
+check('moveItemOnlyUp steps over a hidden sibling',
+  moveItemOnlyUp(filt, 3, 4, visFilt)?.lines[1] === '\t- three');
+check('moveItemOnlyDown steps over a hidden sibling',
+  moveItemOnlyDown(filt, 1, 4, visFilt)?.lines[3] === '\t- one');
 
 // --- selection ranges (Select Branch / Expand Selection) ---
 const selDoc = [

@@ -2,8 +2,18 @@ import { EditorSelection, EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { OutlineEdit } from '@taskpaper/core';
 import { OUTLINE_TAB_SIZE } from './outline';
+import { visibleLineSet } from './filter';
 
 type Op = (lines: string[], line: number, tabSize: number) => OutlineEdit | null;
+
+/** A move operation that reorders relative to the visible outline when a hide
+ *  filter restricts what's on screen. */
+type MoveOp = (
+  lines: string[],
+  line: number,
+  tabSize: number,
+  visible?: Set<number>,
+) => OutlineEdit | null;
 
 /** The document as an array of line strings. */
 export function docLines(state: EditorState): string[] {
@@ -45,4 +55,14 @@ export function applyOutlineOp(view: EditorView, op: Op): boolean {
   }
   dispatchOutlineEdit(view, result, col);
   return true;
+}
+
+/**
+ * Apply an outline MOVE, restricting it to the visible outline whenever a hide
+ * filter is active — so alt+up/down steps over hidden siblings instead of
+ * swapping with one (which would leave the on-screen order unchanged).
+ */
+export function applyMoveOp(view: EditorView, move: MoveOp): boolean {
+  const visible = visibleLineSet(view.state) ?? undefined;
+  return applyOutlineOp(view, (lines, line, tabSize) => move(lines, line, tabSize, visible));
 }

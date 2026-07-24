@@ -42,7 +42,7 @@ import {
   linesToExpandShallowestLevel,
   subtreeFoldRange,
 } from './editor/folding';
-import { applyOutlineOp, dispatchOutlineEdit, docLines } from './editor/outlineEdit';
+import { applyMoveOp, applyOutlineOp, dispatchOutlineEdit, docLines } from './editor/outlineEdit';
 import { copyDisplayed } from './editor/copyDisplayed';
 import { contractSelection, expandSelection, selectBranch, selectedLineRanges } from './editor/selection';
 import { toggleDoneSelection } from './editor/toggleDone';
@@ -435,10 +435,10 @@ export class TaskPaperCommands {
   }
 
   moveUp(view: TaskPaperView): void {
-    applyOutlineOp(view.editor, moveItemUp);
+    applyMoveOp(view.editor, moveItemUp);
   }
   moveDown(view: TaskPaperView): void {
-    applyOutlineOp(view.editor, moveItemDown);
+    applyMoveOp(view.editor, moveItemDown);
   }
   indent(view: TaskPaperView): void {
     applyOutlineOp(view.editor, indentItem);
@@ -450,10 +450,10 @@ export class TaskPaperCommands {
   // Single-item moves (original 'Move' vs 'Move Branch'): only the item's
   // line relocates — its former subtree stays where it is.
   moveOnlyUp(view: TaskPaperView): void {
-    applyOutlineOp(view.editor, moveItemOnlyUp);
+    applyMoveOp(view.editor, moveItemOnlyUp);
   }
   moveOnlyDown(view: TaskPaperView): void {
-    applyOutlineOp(view.editor, moveItemOnlyDown);
+    applyMoveOp(view.editor, moveItemOnlyDown);
   }
   indentOnly(view: TaskPaperView): void {
     applyOutlineOp(view.editor, indentItemOnly);
