@@ -17,18 +17,46 @@ function siblingsOf(item: Item, roots: Item[]): Item[] {
   return item.parent ? item.parent.children : roots;
 }
 
-/** Move an item (and its subtree) above its previous sibling. */
-export function moveItemUp(lines: string[], line: number, tabSize: number): OutlineEdit | null {
+/**
+ * The nearest sibling above `idx` (or below, when `dir` is +1). When `visible`
+ * is given (a hide filter is active) only siblings whose line is on screen
+ * count, so a move steps over hidden siblings instead of swapping with one —
+ * which would leave the visible order unchanged and look like nothing moved.
+ * TaskPaper moves relative to the displayed outline, not the raw document.
+ */
+function adjacentSibling(
+  siblings: Item[],
+  idx: number,
+  dir: -1 | 1,
+  visible?: Set<number>,
+): Item | null {
+  if (idx < 0) {
+    return null;
+  }
+  for (let i = idx + dir; i >= 0 && i < siblings.length; i += dir) {
+    if (!visible || visible.has(siblings[i].line)) {
+      return siblings[i];
+    }
+  }
+  return null;
+}
+
+/** Move an item (and its subtree) above its previous (visible) sibling. */
+export function moveItemUp(
+  lines: string[],
+  line: number,
+  tabSize: number,
+  visible?: Set<number>,
+): OutlineEdit | null {
   const { item, roots } = itemAt(lines, line, tabSize);
   if (!item) {
     return null;
   }
   const siblings = siblingsOf(item, roots);
-  const idx = siblings.indexOf(item);
-  if (idx <= 0) {
+  const prev = adjacentSibling(siblings, siblings.indexOf(item), -1, visible);
+  if (!prev) {
     return null;
   }
-  const prev = siblings[idx - 1];
   const block = lines.slice(item.line, item.subtreeEnd + 1);
   const next = lines.slice();
   next.splice(item.line, block.length);
@@ -36,18 +64,22 @@ export function moveItemUp(lines: string[], line: number, tabSize: number): Outl
   return { lines: next, cursorLine: prev.line + (line - item.line) };
 }
 
-/** Move an item (and its subtree) below its next sibling. */
-export function moveItemDown(lines: string[], line: number, tabSize: number): OutlineEdit | null {
+/** Move an item (and its subtree) below its next (visible) sibling. */
+export function moveItemDown(
+  lines: string[],
+  line: number,
+  tabSize: number,
+  visible?: Set<number>,
+): OutlineEdit | null {
   const { item, roots } = itemAt(lines, line, tabSize);
   if (!item) {
     return null;
   }
   const siblings = siblingsOf(item, roots);
-  const idx = siblings.indexOf(item);
-  if (idx < 0 || idx >= siblings.length - 1) {
+  const nextSib = adjacentSibling(siblings, siblings.indexOf(item), 1, visible);
+  if (!nextSib) {
     return null;
   }
-  const nextSib = siblings[idx + 1];
   const block = lines.slice(item.line, item.subtreeEnd + 1);
   const out = lines.slice();
   out.splice(item.line, block.length);
@@ -63,36 +95,44 @@ export function moveItemDown(lines: string[], line: number, tabSize: number): Ou
 // item now precedes it at a shallower indent.
 // ---------------------------------------------------------------------------
 
-/** Move ONLY the item's line above its previous sibling's line; children stay put. */
-export function moveItemOnlyUp(lines: string[], line: number, tabSize: number): OutlineEdit | null {
+/** Move ONLY the item's line above its previous (visible) sibling; children stay put. */
+export function moveItemOnlyUp(
+  lines: string[],
+  line: number,
+  tabSize: number,
+  visible?: Set<number>,
+): OutlineEdit | null {
   const { item, roots } = itemAt(lines, line, tabSize);
   if (!item) {
     return null;
   }
   const siblings = siblingsOf(item, roots);
-  const idx = siblings.indexOf(item);
-  if (idx <= 0) {
+  const prev = adjacentSibling(siblings, siblings.indexOf(item), -1, visible);
+  if (!prev) {
     return null;
   }
-  const prev = siblings[idx - 1];
   const out = lines.slice();
   out.splice(item.line, 1);
   out.splice(prev.line, 0, lines[item.line]);
   return { lines: out, cursorLine: prev.line };
 }
 
-/** Move ONLY the item's line below its next sibling's branch; children stay put. */
-export function moveItemOnlyDown(lines: string[], line: number, tabSize: number): OutlineEdit | null {
+/** Move ONLY the item's line below its next (visible) sibling's branch; children stay put. */
+export function moveItemOnlyDown(
+  lines: string[],
+  line: number,
+  tabSize: number,
+  visible?: Set<number>,
+): OutlineEdit | null {
   const { item, roots } = itemAt(lines, line, tabSize);
   if (!item) {
     return null;
   }
   const siblings = siblingsOf(item, roots);
-  const idx = siblings.indexOf(item);
-  if (idx < 0 || idx >= siblings.length - 1) {
+  const nextSib = adjacentSibling(siblings, siblings.indexOf(item), 1, visible);
+  if (!nextSib) {
     return null;
   }
-  const nextSib = siblings[idx + 1];
   const out = lines.slice();
   out.splice(item.line, 1);
   // Removing the single item line shifts the next sibling's subtree up by one,

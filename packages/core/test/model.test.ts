@@ -595,6 +595,51 @@ check(
   outdentItemOnly(['A:', '      - spaced'], 1, 4)?.lines[1] === '  - spaced',
 );
 
+// --- moves restricted to the visible outline (a hide filter is active) ---
+// Under `not @done` only the two open tasks are on screen; the @done one is
+// hidden between them. Moving must reorder the DISPLAYED tasks, not swap with
+// the hidden sibling (which would look like nothing happened).
+const filt = ['Inbox:', '\t- one', '\t- two @done', '\t- three'];
+const visFilt = new Set([0, 1, 3]); // "two @done" (line 2) hidden
+
+// "one" is the first VISIBLE sibling — it cannot move up past a hidden sibling.
+check('moveItemUp: first visible sibling returns null', moveItemUp(filt, 1, 4, visFilt) === null);
+// The old bug: without the visible set, moving "three" up merely swaps it with
+// the hidden "two @done", so the on-screen order (one, three) is unchanged and
+// the move looks like a no-op.
+check('moveItemUp: without a filter it swaps with the hidden sibling',
+  moveItemUp(filt, 3, 4)?.lines[2] === '\t- three' &&
+    moveItemUp(filt, 3, 4)?.lines[3] === '\t- two @done');
+
+// "three" moves up over the hidden "two @done" to sit above "one".
+const upOverHidden = moveItemUp(filt, 3, 4, visFilt);
+check('moveItemUp steps over a hidden sibling',
+  upOverHidden !== null &&
+    upOverHidden.lines[1] === '\t- three' &&
+    upOverHidden.lines[2] === '\t- one' &&
+    upOverHidden.lines[3] === '\t- two @done' &&
+    upOverHidden.cursorLine === 1,
+  JSON.stringify(upOverHidden?.lines));
+
+// "one" moves down over the hidden "two @done" to sit below "three".
+const downOverHidden = moveItemDown(filt, 1, 4, visFilt);
+check('moveItemDown steps over a hidden sibling',
+  downOverHidden !== null &&
+    downOverHidden.lines[1] === '\t- two @done' &&
+    downOverHidden.lines[2] === '\t- three' &&
+    downOverHidden.lines[3] === '\t- one' &&
+    downOverHidden.cursorLine === 3,
+  JSON.stringify(downOverHidden?.lines));
+
+// "three" is the last VISIBLE sibling — it cannot move down.
+check('moveItemDown: last visible sibling returns null', moveItemDown(filt, 3, 4, visFilt) === null);
+
+// The single-line variants respect visibility too.
+check('moveItemOnlyUp steps over a hidden sibling',
+  moveItemOnlyUp(filt, 3, 4, visFilt)?.lines[1] === '\t- three');
+check('moveItemOnlyDown steps over a hidden sibling',
+  moveItemOnlyDown(filt, 1, 4, visFilt)?.lines[3] === '\t- one');
+
 // --- selection ranges (Select Branch / Expand Selection) ---
 const selDoc = [
   'Inbox:',

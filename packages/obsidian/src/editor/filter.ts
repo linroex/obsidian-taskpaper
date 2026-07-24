@@ -299,26 +299,58 @@ export function isFilterActive(state: EditorState): boolean {
   return state.field(filterSpecField, false) != null;
 }
 
-function buildFilterDeco(state: EditorState, spec: FilterSpec): DecorationSet {
+/**
+ * The 0-based lines currently on screen under `spec`: the focus set or the
+ * query's matches (with their outline context), plus any lines temporarily
+ * revealed while edited. May throw when the query is invalid (callers decide
+ * how to degrade).
+ */
+function computeVisibleLines(state: EditorState, spec: FilterSpec): Set<number> {
   let visible: Set<number>;
   if (spec.mode === 'focus') {
     visible = new Set(spec.visible);
   } else {
-    try {
-      const matches = runQuery(spec.query, outlineOf(state));
-      visible = new Set<number>();
-      for (const m of matches) {
-        for (const item of filterContextItems(m)) {
-          visible.add(item.line); // 0-based
-        }
+    const matches = runQuery(spec.query, outlineOf(state));
+    visible = new Set<number>();
+    for (const m of matches) {
+      for (const item of filterContextItems(m)) {
+        visible.add(item.line); // 0-based
       }
-    } catch {
-      return Decoration.none;
     }
   }
-
   for (const revealed of state.field(revealedTaskField)) {
     visible.add(state.doc.lineAt(Math.min(revealed, state.doc.length)).number - 1);
+  }
+  return visible;
+}
+
+/**
+ * The set of 0-based visible lines when a HIDE filter is active, else null.
+ * Outline moves use this so they step over hidden siblings and reorder the
+ * DISPLAYED outline (TaskPaper's behavior) instead of swapping with an unseen
+ * sibling — which leaves the visible order unchanged and looks like a no-op.
+ * A dim filter (or no filter) keeps every line on screen, so it imposes no
+ * restriction and returns null. Invalid queries also return null (no filter
+ * effect is applied, so moves fall back to the raw outline).
+ */
+export function visibleLineSet(state: EditorState): Set<number> | null {
+  const spec = state.field(filterSpecField, false);
+  if (!spec || !spec.hide) {
+    return null;
+  }
+  try {
+    return computeVisibleLines(state, spec);
+  } catch {
+    return null;
+  }
+}
+
+function buildFilterDeco(state: EditorState, spec: FilterSpec): DecorationSet {
+  let visible: Set<number>;
+  try {
+    visible = computeVisibleLines(state, spec);
+  } catch {
+    return Decoration.none;
   }
 
   const builder = new RangeSetBuilder<Decoration>();

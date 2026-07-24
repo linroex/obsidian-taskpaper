@@ -894,6 +894,42 @@ function renderedLines(view: EditorView): HTMLElement[] {
   cleanup();
 }
 {
+  // --- moving a branch under a hide filter reorders the DISPLAYED outline ---
+  // Under `not @done` the middle task is hidden. Moving must step over it, not
+  // swap with it (which used to leave the visible order unchanged).
+  const doc = ['Inbox:', '\t- one', '\t- two @done(2026-01-01)', '\t- three'].join('\n');
+  const { view, cleanup } = mountEditor(doc);
+  view.dispatch({ effects: setFilterEffect.of({ mode: 'query', query: 'not @done', hide: true }) });
+  check('the @done task is hidden by the filter', hiddenLineNumbers(view).has(3));
+
+  // Cursor on "three" (last visible sibling); move it up past the hidden task.
+  view.dispatch({ selection: { anchor: view.state.doc.line(4).from + 3 } });
+  press(view, 'ArrowUp', { ctrl: true, shift: true });
+  check(
+    'ctrl-shift-up moves "three" above "one", stepping over the hidden task',
+    docText(view) ===
+      ['Inbox:', '\t- three', '\t- one', '\t- two @done(2026-01-01)'].join('\n'),
+    JSON.stringify(docText(view)),
+  );
+  check(
+    'the cursor follows the moved branch',
+    view.state.doc.lineAt(view.state.selection.main.head).number === 2,
+    String(view.state.doc.lineAt(view.state.selection.main.head).number),
+  );
+
+  // "three" is now the first visible sibling — moving up again is a no-op
+  // (it must NOT swap with the hidden task, which looked like nothing moved).
+  const before = docText(view);
+  view.dispatch({ selection: { anchor: view.state.doc.line(2).from + 3 } });
+  press(view, 'ArrowUp', { ctrl: true, shift: true });
+  check(
+    'ctrl-shift-up at the first VISIBLE sibling is a no-op, never a hidden swap',
+    docText(view) === before,
+    JSON.stringify(docText(view)),
+  );
+  cleanup();
+}
+{
   // Ctrl-Shift-Right indents the whole branch; Ctrl-Shift-Left undoes it.
   const doc = ['A:', '\t- a1', '\t\t- a2', '\t- a3'].join('\n');
   const { view, cleanup } = mountEditor(doc);
