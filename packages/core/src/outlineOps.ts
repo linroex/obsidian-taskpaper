@@ -1,4 +1,4 @@
-import { buildOutline, Item, ItemKind, itemAtLine, lineKind } from './model';
+import { buildOutline, Item, ItemKind, itemAtLine, lineKind, Outline } from './model';
 
 export interface OutlineEdit {
   lines: string[];
@@ -20,9 +20,8 @@ function siblingsOf(item: Item, roots: Item[]): Item[] {
 /**
  * The nearest sibling above `idx` (or below, when `dir` is +1). When `visible`
  * is given (a hide filter is active) only siblings whose line is on screen
- * count, so a move steps over hidden siblings instead of swapping with one —
- * which would leave the visible order unchanged and look like nothing moved.
- * TaskPaper moves relative to the displayed outline, not the raw document.
+ * count, so a move steps over hidden siblings instead of swapping with one.
+ * Used by the single-line "Move" variants, which reorder within a parent.
  */
 function adjacentSibling(
   siblings: Item[],
@@ -41,51 +40,153 @@ function adjacentSibling(
   return null;
 }
 
-/** Move an item (and its subtree) above its previous (visible) sibling. */
+/** The leading whitespace (indentation) of a line. */
+function leadingWhitespace(lineText: string): string {
+  return /^[\t ]*/.exec(lineText)?.[0] ?? '';
+}
+
+/**
+ * The item directly ABOVE `line` in the DISPLAYED outline: the last item
+ * before `line` whose line is on screen. With no `visible` set every item is
+ * displayed, so this is simply the item on the line above. (TaskPaper's
+ * `getPreviousDisplayedItem`.)
+ */
+function prevDisplayedItem(outline: Outline, line: number, visible?: Set<number>): Item | null {
+  let found: Item | null = null;
+  for (const it of outline.items) {
+    if (it.line >= line) {
+      break; // outline.items is in document order
+    }
+    if (!visible || visible.has(it.line)) {
+      found = it;
+    }
+  }
+  return found;
+}
+
+/** The item directly BELOW `line` in the DISPLAYED outline
+ *  (TaskPaper's `getNextDisplayedItem`). */
+function nextDisplayedItem(outline: Outline, line: number, visible?: Set<number>): Item | null {
+  for (const it of outline.items) {
+    if (it.line > line && (!visible || visible.has(it.line))) {
+      return it;
+    }
+  }
+  return null;
+}
+
+/**
+ * Relocate `item`'s whole branch so its own line takes `baseIndent` and its
+ * subtree keeps its relative shape, inserted at `insertAt` (a line index in the
+ * ORIGINAL document). Returns null when nothing actually moves.
+ */
+function relocateBranch(
+  outline: Outline,
+  lines: string[],
+  item: Item,
+  baseIndent: string,
+  insertAt: number,
+  cursorWithin: number,
+): OutlineEdit | null {
+  const byLine = new Map(
+    outline.items
+      .filter((i) => i.line >= item.line && i.line <= item.subtreeEnd)
+      .map((i) => [i.line, i] as const),
+  );
+  const block: string[] = [];
+  for (let ln = item.line; ln <= item.subtreeEnd; ln++) {
+    const it = byLine.get(ln);
+    block.push(it ? baseIndent + '\t'.repeat(it.level - item.level) + it.text : lines[ln]);
+  }
+  const out = lines.slice();
+  out.splice(item.line, block.length);
+  // Insertion index in ORIGINAL coordinates; shift up when the removed block
+  // sits before it.
+  let at = insertAt;
+  if (item.line < at) {
+    at -= block.length;
+  }
+  out.splice(at, 0, ...block);
+  if (out.length === lines.length && out.every((l, i) => l === lines[i])) {
+    return null;
+  }
+  return { lines: out, cursorLine: at + cursorWithin };
+}
+
+/**
+ * Move an item (and its subtree) UP one row in the DISPLAYED outline, matching
+ * TaskPaper's `moveBranchesUp`: the branch lands directly before the previous
+ * displayed item, adopting that item's parent and indent level. So it steps
+ * over hidden siblings (fixing the "looks like nothing moved" case) and, at the
+ * top of a group, climbs out to sit above its parent — exactly like the
+ * original. `visible` is the on-screen line set under a hide filter; without it
+ * every item is displayed and the move follows plain document order.
+ */
 export function moveItemUp(
   lines: string[],
   line: number,
   tabSize: number,
   visible?: Set<number>,
 ): OutlineEdit | null {
-  const { item, roots } = itemAt(lines, line, tabSize);
+  const outline = buildOutline(lines, tabSize);
+  const item = outline.items.find((i) => i.line === line);
   if (!item) {
     return null;
   }
-  const siblings = siblingsOf(item, roots);
-  const prev = adjacentSibling(siblings, siblings.indexOf(item), -1, visible);
+  const prev = prevDisplayedItem(outline, item.line, visible);
   if (!prev) {
-    return null;
+    return null; // already the first displayed item — nothing above to pass
   }
-  const block = lines.slice(item.line, item.subtreeEnd + 1);
-  const next = lines.slice();
-  next.splice(item.line, block.length);
-  next.splice(prev.line, 0, ...block);
-  return { lines: next, cursorLine: prev.line + (line - item.line) };
+  return relocateBranch(
+    outline,
+    lines,
+    item,
+    leadingWhitespace(lines[prev.line]),
+    prev.line,
+    line - item.line,
+  );
 }
 
-/** Move an item (and its subtree) below its next (visible) sibling. */
+/**
+ * Move an item (and its subtree) DOWN one row in the DISPLAYED outline, matching
+ * TaskPaper's `moveBranchesDown`: the branch lands directly after the next
+ * displayed item — descending INTO it when that item has visible children, and
+ * appending to the parent when nothing follows. Steps over hidden siblings.
+ */
 export function moveItemDown(
   lines: string[],
   line: number,
   tabSize: number,
   visible?: Set<number>,
 ): OutlineEdit | null {
-  const { item, roots } = itemAt(lines, line, tabSize);
+  const outline = buildOutline(lines, tabSize);
+  const item = outline.items.find((i) => i.line === line);
   if (!item) {
     return null;
   }
-  const siblings = siblingsOf(item, roots);
-  const nextSib = adjacentSibling(siblings, siblings.indexOf(item), 1, visible);
-  if (!nextSib) {
-    return null;
+  // The displayed item just past this branch, and the one past THAT: the branch
+  // slots in before the latter (so it lands right after the former).
+  const after = nextDisplayedItem(outline, item.subtreeEnd, visible);
+  if (!after) {
+    return null; // already the last displayed item
   }
-  const block = lines.slice(item.line, item.subtreeEnd + 1);
-  const out = lines.slice();
-  out.splice(item.line, block.length);
-  const nextEndAfter = nextSib.subtreeEnd - block.length;
-  out.splice(nextEndAfter + 1, 0, ...block);
-  return { lines: out, cursorLine: nextEndAfter + 1 + (line - item.line) };
+  const following = nextDisplayedItem(outline, after.line, visible);
+  if (following) {
+    return relocateBranch(
+      outline,
+      lines,
+      item,
+      leadingWhitespace(lines[following.line]),
+      following.line,
+      line - item.line,
+    );
+  }
+  // Nothing follows `after`: append as the last child of its parent (or at the
+  // document's end when `after` is a root).
+  const parent = after.parent;
+  const baseIndent = parent ? leadingWhitespace(lines[parent.line]) + '\t' : '';
+  const insertAt = parent ? parent.subtreeEnd + 1 : lines.length;
+  return relocateBranch(outline, lines, item, baseIndent, insertAt, line - item.line);
 }
 
 // ---------------------------------------------------------------------------

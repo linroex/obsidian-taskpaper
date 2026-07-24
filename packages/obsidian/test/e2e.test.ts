@@ -917,14 +917,15 @@ function renderedLines(view: EditorView): HTMLElement[] {
     String(view.state.doc.lineAt(view.state.selection.main.head).number),
   );
 
-  // "three" is now the first visible sibling — moving up again is a no-op
-  // (it must NOT swap with the hidden task, which looked like nothing moved).
-  const before = docText(view);
+  // "three" is now the first visible child of Inbox; its previous displayed row
+  // is the "Inbox:" heading, so (matching TaskPaper) another up climbs it OUT
+  // above the project — never a silent swap with the hidden task.
   view.dispatch({ selection: { anchor: view.state.doc.line(2).from + 3 } });
   press(view, 'ArrowUp', { ctrl: true, shift: true });
   check(
-    'ctrl-shift-up at the first VISIBLE sibling is a no-op, never a hidden swap',
-    docText(view) === before,
+    'ctrl-shift-up on the first visible child climbs out above the project',
+    docText(view) ===
+      ['- three', 'Inbox:', '\t- one', '\t- two @done(2026-01-01)'].join('\n'),
     JSON.stringify(docText(view)),
   );
   cleanup();
